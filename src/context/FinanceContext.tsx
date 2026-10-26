@@ -351,10 +351,23 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!user) return
     setIsLoading(true)
     try {
+      // Ensure profile exists in DB before saving envelopes (foreign key requirement)
+      await DataService.updateProfile({
+        id: user.id,
+        email: user.email ?? null,
+        full_name: user.fullName ?? null,
+        opening_balance: profile?.opening_balance ?? 0,
+        currency: profile?.currency ?? 'IDR',
+        timezone: profile?.timezone ?? 'Asia/Jakarta',
+      })
+
       const { envelopes: newEnvs, transfers: newTrs } = await DataService.applyInitialTemplate(user.id)
       setEnvelopes(newEnvs)
-      setTransfers(newTrs)
-      recalculate(profile, newEnvs, transactions, newTrs)
+      setTransfers((prev) => [...newTrs, ...prev])
+      recalculate(profile, newEnvs, transactions, [...newTrs, ...transfers])
+    } catch (err) {
+      console.error('Gagal menerapkan template:', err)
+      alert('Gagal menerapkan template: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
       setIsLoading(false)
     }
