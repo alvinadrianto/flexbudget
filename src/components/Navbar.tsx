@@ -204,6 +204,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               {formatRupiah(summary?.trackedBalance || 0)}
             </span>
           </div>
+
+          {/* Logout button - only show when logged in via Supabase */}
+          {isSupabaseConnected && user && (
+            <button
+              onClick={logout}
+              title="Keluar"
+              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </header>
 
