@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from 'react'
-import { X, AlertTriangle, ShieldCheck, Zap, SlidersHorizontal } from 'lucide-react'
+import {
+  X,
+  AlertTriangle,
+  ShieldCheck,
+  Zap,
+  SlidersHorizontal,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Coffee,
+} from 'lucide-react'
 import type { Envelope, EnvelopeBalanceInfo } from '../types/finance'
 import { formatRupiah, parseRupiahInput } from '../services/financialEngine'
 
@@ -30,11 +40,13 @@ export const DeficitModal: React.FC<DeficitModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [autoLogs, setAutoLogs] = useState<string[]>([])
+  const [showMonthlySpendingOptions, setShowMonthlySpendingOptions] = useState(false)
 
   useEffect(() => {
     setAllocations({})
     setError(null)
     setAutoLogs([])
+    setShowMonthlySpendingOptions(false)
   }, [isOpen, deficitEnvelopeInfo])
 
   if (!isOpen || !deficitEnvelopeInfo) return null
@@ -42,15 +54,64 @@ export const DeficitModal: React.FC<DeficitModalProps> = ({
   const deficitAmount = deficitEnvelopeInfo.deficitAmount
   const deficitEnv = deficitEnvelopeInfo.envelope
 
-  // Eligible source envelopes (positive balance, not the deficit envelope itself)
-  const eligibleSources = allEnvelopeBalances.filter(
-    (b) => b.envelope.id !== deficitEnv.id && b.availableSurplus > 0
+  // 1. Primary Source: Funding Pools (Pools Bulanan)
+  const poolSources = allEnvelopeBalances
+    .filter(
+      (b) =>
+        b.envelope.id !== deficitEnv.id &&
+        b.availableSurplus > 0 &&
+        b.envelope.type === 'funding_pool'
+    )
+    .sort((a, b) => {
+      // Prioritize the linked funding pool for this envelope
+      if (a.envelope.id === deficitEnv.funding_source_id) return -1
+      if (b.envelope.id === deficitEnv.funding_source_id) return 1
+      return b.availableSurplus - a.availableSurplus
+    })
+
+  // 2. Discretionary Allowances (Tunjangan Jajan Mingguan & Fleksibel)
+  const allowanceSources = allEnvelopeBalances
+    .filter(
+      (b) =>
+        b.envelope.id !== deficitEnv.id &&
+        b.availableSurplus > 0 &&
+        (b.envelope.type === 'spending_weekly' || b.envelope.type === 'spending_daily')
+    )
+    .sort((a, b) => b.availableSurplus - a.availableSurplus)
+
+  // 3. Emergency Fund & Savings (Dana Darurat & Tabungan)
+  const reserveSources = allEnvelopeBalances
+    .filter(
+      (b) =>
+        b.envelope.id !== deficitEnv.id &&
+        b.availableSurplus > 0 &&
+        (b.envelope.type === 'emergency_fund' ||
+          b.envelope.type === 'reserve' ||
+          b.envelope.type === 'savings')
+    )
+    .sort((a, b) => {
+      // Put emergency_fund and reserve first, then savings
+      const score = (t: string) => (t === 'emergency_fund' ? 1 : t === 'reserve' ? 2 : 3)
+      return score(a.envelope.type) - score(b.envelope.type)
+    })
+
+  // 4. Operational Monthly Spending (Beda Kategori - Excluded by default!)
+  const monthlySpendingSources = allEnvelopeBalances.filter(
+    (b) =>
+      b.envelope.id !== deficitEnv.id &&
+      b.availableSurplus > 0 &&
+      b.envelope.type !== 'funding_pool' &&
+      b.envelope.type !== 'spending_weekly' &&
+      b.envelope.type !== 'spending_daily' &&
+      b.envelope.type !== 'emergency_fund' &&
+      b.envelope.type !== 'reserve' &&
+      b.envelope.type !== 'savings'
   )
 
-  // Calculate sum of chosen manual coverage amounts
+  // Calculate sum of chosen manual coverage amounts across all inputs
   let totalManualCovered = 0
-  for (const src of eligibleSources) {
-    const val = parseRupiahInput(allocations[src.envelope.id] || '0')
+  for (const b of allEnvelopeBalances) {
+    const val = parseRupiahInput(allocations[b.envelope.id] || '0')
     totalManualCovered += val
   }
 
@@ -66,7 +127,8 @@ export const DeficitModal: React.FC<DeficitModalProps> = ({
       return
     }
 
-    const payload = eligibleSources
+    const payload = allEnvelopeBalances
+      .filter((b) => b.envelope.id !== deficitEnv.id)
       .map((src) => ({
         sourceEnvelope: src.envelope,
         availableFunds: src.availableSurplus,
@@ -108,9 +170,107 @@ export const DeficitModal: React.FC<DeficitModalProps> = ({
     }
   }
 
+  const renderSourceCard = (
+    src: EnvelopeBalanceInfo,
+    badgeText?: string,
+    badgeColor?: string,
+    isLinkedPool?: boolean
+  ) => {
+    const currentEntered = parseRupiahInput(allocations[src.envelope.id] || '0')
+
+    return (
+      <div
+        key={src.envelope.id}
+        className={`p-3.5 rounded-2xl bg-slate-950 border transition-colors ${
+          isLinkedPool
+            ? 'border-indigo-500/50 bg-indigo-950/20 hover:border-indigo-500'
+            : 'border-slate-800 hover:border-slate-700'
+        }`}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-white block">{src.envelope.name}</span>
+            {badgeText && (
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                  badgeColor || 'bg-slate-800 border-slate-700 text-slate-300'
+                }`}
+              >
+                {badgeText}
+              </span>
+            )}
+          </div>
+          {src.envelope.min_protected_balance > 0 && (
+            <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">
+              <ShieldCheck className="w-3 h-3" />
+              Proteksi {formatRupiah(src.envelope.min_protected_balance)}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+          <span>
+            Saldo Bebas:{' '}
+            <strong className="text-emerald-400 font-mono font-bold">
+              {formatRupiah(src.availableSurplus)}
+            </strong>
+          </span>
+          {isLinkedPool && (
+            <span className="text-indigo-300 text-[10px] font-semibold">
+              Pool induk dari {deficitEnv.name}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500">
+              Rp
+            </span>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="0"
+              value={
+                allocations[src.envelope.id]
+                  ? new Intl.NumberFormat('id-ID').format(currentEntered)
+                  : ''
+              }
+              onChange={(e) => {
+                const val = parseRupiahInput(e.target.value)
+                const capped = Math.min(val, src.availableSurplus)
+                setAllocations((prev) => ({
+                  ...prev,
+                  [src.envelope.id]: capped > 0 ? capped.toString() : '',
+                }))
+              }}
+              className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2 text-xs font-mono font-bold text-white placeholder-slate-600 focus:outline-none"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              // Fill either full remaining deficit or full source available
+              const needed = Math.max(0, deficitAmount - (totalManualCovered - currentEntered))
+              const canTake = Math.min(needed, src.availableSurplus)
+              setAllocations((prev) => ({
+                ...prev,
+                [src.envelope.id]: canTake > 0 ? canTake.toString() : '',
+              }))
+            }}
+            className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-indigo-300 transition-colors"
+          >
+            Ambil Sisa
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl overflow-hidden relative max-h-[90vh] flex flex-col">
+      <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl overflow-hidden relative max-h-[92vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-800/80">
           <div className="flex items-center gap-2.5">
@@ -135,7 +295,9 @@ export const DeficitModal: React.FC<DeficitModalProps> = ({
         {/* Deficit Banner */}
         <div className="my-4 p-4 rounded-2xl bg-rose-950/40 border border-rose-500/30 flex items-center justify-between">
           <div>
-            <span className="text-xs text-rose-300 font-medium block">Total Defisit yang Harus Ditutup</span>
+            <span className="text-xs text-rose-300 font-medium block">
+              Total Defisit yang Harus Ditutup
+            </span>
             <span className="text-2xl font-black text-rose-400 font-mono tracking-tight">
               {formatRupiah(deficitAmount)}
             </span>
@@ -172,7 +334,7 @@ export const DeficitModal: React.FC<DeficitModalProps> = ({
             }`}
           >
             <Zap className="w-4 h-4 text-amber-400" />
-            Otomatis (Sesuai Aturan)
+            Otomatis (Sesuai Prioritas)
           </button>
         </div>
 
@@ -186,92 +348,141 @@ export const DeficitModal: React.FC<DeficitModalProps> = ({
         <div className="flex-1 overflow-y-auto space-y-4 pr-1">
           {mode === 'manual' ? (
             <form id="deficit-manual-form" onSubmit={handleManualSubmit} className="space-y-4">
-              <p className="text-xs text-slate-400">
-                Pilih amplop sumber yang memiliki dana bebas untuk menutupi defisit. Proteksi tabungan tetap dijaga.
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Gunakan <strong>Pools Bulanan</strong> atau <strong>Dana Darurat / Tabungan</strong>{' '}
+                sebagai sumber penutup defisit tanpa mengorbankan pos pengeluaran bulanan lainnya.
               </p>
 
-              {eligibleSources.length === 0 ? (
-                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-center text-xs text-slate-400">
-                  Tidak ada amplop lain yang memiliki surplus dana di atas saldo proteksi. Anda dapat menambahkan pemasukan baru.
+              {/* SECTION 1: POOLS BULANAN (RECOMMENDED PRIMARY) */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
+                  <Sparkles className="w-4 h-4 text-indigo-400" />
+                  <span>1. Pool Anggaran Bulanan (Sangat Direkomendasikan)</span>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  {eligibleSources.map((src) => {
-                    const currentEntered = parseRupiahInput(allocations[src.envelope.id] || '0')
-                    const previewRemaining = src.availableSurplus - currentEntered
+                <p className="text-[11px] text-slate-400 leading-normal">
+                  Pool bulanan berfungsi sebagai cadangan alokasi rutin. Menggunakan pool adalah langkah paling logis sebelum menyentuh tabungan.
+                </p>
 
-                    return (
-                      <div
-                        key={src.envelope.id}
-                        className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition-colors"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div>
-                            <span className="text-xs font-bold text-white block">{src.envelope.name}</span>
-                            <span className="text-[11px] text-slate-400">
-                              Bebas Digunakan: <strong className="text-emerald-400 font-mono">{formatRupiah(src.availableSurplus)}</strong>
-                            </span>
-                          </div>
-                          {src.envelope.min_protected_balance > 0 && (
-                            <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">
-                              <ShieldCheck className="w-3 h-3" />
-                              Proteksi {formatRupiah(src.envelope.min_protected_balance)}
-                            </span>
-                          )}
-                        </div>
+                {poolSources.length === 0 ? (
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-500 text-xs text-center">
+                    Tidak ada saldo tersisa di pool anggaran bulanan.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {poolSources.map((src) => {
+                      const isLinked = src.envelope.id === deficitEnv.funding_source_id
+                      return renderSourceCard(
+                        src,
+                        isLinked ? '⭐ Pool Terkait' : 'Pool Bulanan',
+                        isLinked
+                          ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300 font-bold'
+                          : 'bg-purple-500/20 border-purple-500/40 text-purple-300',
+                        isLinked
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
 
-                        <div className="flex items-center gap-2">
-                          <div className="relative flex-1">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500">
-                              Rp
-                            </span>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              placeholder="0"
-                              value={
-                                allocations[src.envelope.id]
-                                  ? new Intl.NumberFormat('id-ID').format(currentEntered)
-                                  : ''
-                              }
-                              onChange={(e) => {
-                                const val = parseRupiahInput(e.target.value)
-                                const capped = Math.min(val, src.availableSurplus)
-                                setAllocations((prev) => ({
-                                  ...prev,
-                                  [src.envelope.id]: capped > 0 ? capped.toString() : '',
-                                }))
-                              }}
-                              className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2 text-xs font-mono font-bold text-white placeholder-slate-600 focus:outline-none"
-                            />
-                          </div>
+              {/* SECTION 2: TUNJANGAN JAJAN MINGGUAN & FLEKSIBEL */}
+              <div className="space-y-2 pt-2 border-t border-slate-800/70">
+                <div className="flex items-center gap-2 text-xs font-bold text-purple-300">
+                  <Coffee className="w-4 h-4 text-purple-400" />
+                  <span>2. Tunjangan Jajan Mingguan & Fleksibel</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-normal">
+                  Sisa saldo uang jajan mingguan yang belum terpakai. Mengorbankan pos jajan jauh lebih fleksibel dan bijak daripada menguras tabungan.
+                </p>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              // Fill either full remaining deficit or full source available
-                              const needed = Math.max(0, deficitAmount - (totalManualCovered - currentEntered))
-                              const canTake = Math.min(needed, src.availableSurplus)
-                              setAllocations((prev) => ({
-                                ...prev,
-                                [src.envelope.id]: canTake > 0 ? canTake.toString() : '',
-                              }))
-                            }}
-                            className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-indigo-300 transition-colors"
-                          >
-                            Maks
-                          </button>
-                        </div>
+                {allowanceSources.length === 0 ? (
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-500 text-xs text-center">
+                    Tidak ada saldo tersisa di amplop jajan mingguan atau tunjangan fleksibel.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {allowanceSources.map((src) =>
+                      renderSourceCard(
+                        src,
+                        src.envelope.type === 'spending_weekly' ? 'Jajan Mingguan' : 'Tunjangan Harian',
+                        'bg-purple-500/20 border-purple-500/40 text-purple-300 font-semibold'
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
 
-                        {currentEntered > 0 && (
-                          <div className="mt-2 text-[10px] text-slate-400 flex justify-between">
-                            <span>Sisa saldo sumber:</span>
-                            <span className="font-mono text-slate-200">{formatRupiah(previewRemaining)}</span>
-                          </div>
+              {/* SECTION 3: DANA DARURAT & TABUNGAN (SECONDARY RESERVE) */}
+              <div className="space-y-2 pt-2 border-t border-slate-800/70">
+                <div className="flex items-center gap-2 text-xs font-bold text-emerald-300">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>3. Dana Darurat & Tabungan Cadangan</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-normal">
+                  Jaring pengaman cadangan untuk menyerap pengeluaran di luar kendali. Saldo di bawah batas proteksi tetap aman terlindungi.
+                </p>
+
+                {reserveSources.length === 0 ? (
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-500 text-xs text-center">
+                    Tidak ada saldo bebas di atas proteksi minimum tabungan atau dana darurat.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {reserveSources.map((src) =>
+                      renderSourceCard(
+                        src,
+                        src.envelope.type === 'emergency_fund' ? 'Dana Darurat' : 'Tabungan',
+                        src.envelope.type === 'emergency_fund'
+                          ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                          : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 4: COLLAPSED MONTHLY SPENDING (EXCLUDED BY DEFAULT - DIFFERENT CATEGORY) */}
+              {monthlySpendingSources.length > 0 && (
+                <div className="pt-2 border-t border-slate-800/70">
+                  <button
+                    type="button"
+                    onClick={() => setShowMonthlySpendingOptions(!showMonthlySpendingOptions)}
+                    className="flex items-center justify-between w-full p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-slate-700 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>
+                        Pos Pengeluaran Bulanan Tetap ({monthlySpendingSources.length} amplop - Beda Kategori)
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-indigo-400 font-semibold flex items-center gap-1">
+                      {showMonthlySpendingOptions ? (
+                        <>
+                          Sembunyikan <ChevronUp className="w-3.5 h-3.5" />
+                        </>
+                      ) : (
+                        <>
+                          Buka Opsi (Tidak Disarankan) <ChevronDown className="w-3.5 h-3.5" />
+                        </>
+                      )}
+                    </span>
+                  </button>
+
+                  {showMonthlySpendingOptions && (
+                    <div className="mt-2 p-3 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-3 animate-in fade-in">
+                      <p className="text-[11px] text-amber-300 leading-relaxed">
+                        ⚠️ <strong>Peringatan Beda Kategori:</strong> Mengambil dana dari pos pengeluaran bulanan rutin (seperti Bensin atau Makanan Kucing) dapat menyebabkan pos tersebut mengalami kekurangan dana di akhir bulan.
+                      </p>
+                      <div className="space-y-2">
+                        {monthlySpendingSources.map((src) =>
+                          renderSourceCard(
+                            src,
+                            'Pengeluaran Bulanan',
+                            'bg-rose-500/20 border-rose-500/30 text-rose-300'
+                          )
                         )}
                       </div>
-                    )
-                  })}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -302,14 +513,43 @@ export const DeficitModal: React.FC<DeficitModalProps> = ({
               </div>
             </form>
           ) : (
+            /* AUTOMATIC MODE */
             <div className="space-y-4">
-              <p className="text-xs text-slate-300">
-                Sistem akan secara otomatis mencari amplop dengan surplus dana berdasarkan urutan prioritas yang telah Anda konfigurasi, tanpa mengurangi tabungan atau saldo yang diproteksi.
-              </p>
+              <div className="p-4 rounded-2xl bg-indigo-950/30 border border-indigo-500/30 space-y-2 text-xs">
+                <h4 className="font-bold text-white flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-amber-400" />
+                  Hierarki Penutupan Otomatis Cerdas
+                </h4>
+                <p className="text-slate-300 leading-relaxed text-[11px]">
+                  Sistem FlexBudget akan mencari dana penutup defisit secara berurutan sesuai prinsip finansial yang benar:
+                </p>
+                <ol className="list-decimal list-inside space-y-1 text-slate-400 text-[11px] pt-1">
+                  <li>
+                    <strong className="text-indigo-300">Pool Anggaran Bulanan Terkait</strong> (misal Daily Spending Pool untuk Tunjangan Harian)
+                  </li>
+                  <li>
+                    <strong className="text-purple-300">Pools Bulanan Lainnya</strong> yang masih memiliki saldo
+                  </li>
+                  <li>
+                    <strong className="text-pink-300">Tunjangan Jajan Mingguan & Fleksibel</strong> (sisa jajan minggu ini)
+                  </li>
+                  <li>
+                    <strong className="text-amber-300">Dana Darurat / Cadangan</strong> (di atas batas proteksi)
+                  </li>
+                  <li>
+                    <strong className="text-emerald-300">Tabungan Utama</strong> (di atas batas proteksi)
+                  </li>
+                </ol>
+                <p className="text-[10px] text-slate-400 italic pt-1">
+                  * Pos pengeluaran bulanan tetap (seperti Bensin atau Makanan Kucing) <strong>tidak akan pernah</strong> disentuh secara otomatis.
+                </p>
+              </div>
 
               {autoLogs.length > 0 && (
                 <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1 text-xs">
-                  <span className="font-bold text-slate-300 block mb-1">Riwayat Eksekusi Otomatis:</span>
+                  <span className="font-bold text-slate-300 block mb-1">
+                    Riwayat Eksekusi Otomatis:
+                  </span>
                   {autoLogs.map((log, i) => (
                     <p key={i} className="text-slate-400 font-mono text-[11px]">
                       • {log}

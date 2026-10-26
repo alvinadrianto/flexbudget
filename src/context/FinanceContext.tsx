@@ -37,6 +37,7 @@ interface FinanceContextType {
   coverDeficitAutomatically: (deficitEnvelopeId: string) => Promise<{ success: boolean; summaryLog: string[]; remainingDeficit: number }>
   loadInitialTemplate: () => Promise<void>
   restoreFromBackup: (backup: any) => Promise<void>
+  resetAllData: () => Promise<void>
   refreshData: () => Promise<void>
 }
 
@@ -370,6 +371,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }
 
+  const resetAllData = async (): Promise<void> => {
+    if (!user) return
+    setIsLoading(true)
+    try {
+      await DataService.resetAllData(user.id)
+      await loadData()
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   return (
     <FinanceContext.Provider
       value={{
@@ -392,6 +404,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         coverDeficitAutomatically,
         loadInitialTemplate,
         restoreFromBackup,
+        resetAllData,
         refreshData: loadData,
       }}
     >

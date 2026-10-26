@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
-import { X, Sparkles, CheckCircle2 } from 'lucide-react'
-import type { Envelope } from '../types/finance'
-import { formatRupiah, getJakartaDateStrings } from '../services/financialEngine'
+import React, { useState, useEffect } from 'react'
+import { X, Sparkles, CheckCircle2, Clock, PlusCircle } from 'lucide-react'
+import type { Envelope, Transfer } from '../types/finance'
+import { formatRupiah, checkAllowanceStatus } from '../services/financialEngine'
 
 interface ReleaseModalProps {
   isOpen: boolean
@@ -9,7 +9,13 @@ interface ReleaseModalProps {
   targetEnvelope: Envelope | null
   poolEnvelope: Envelope | null
   poolBalance: number
-  onRelease: (poolId: string, targetId: string, amount: number, periodKey: string) => Promise<{ success: boolean; error?: string }>
+  transfers: Transfer[]
+  onRelease: (
+    poolId: string,
+    targetId: string,
+    amount: number,
+    periodKey: string
+  ) => Promise<{ success: boolean; error?: string }>
 }
 
 export const ReleaseModal: React.FC<ReleaseModalProps> = ({
@@ -18,11 +24,23 @@ export const ReleaseModal: React.FC<ReleaseModalProps> = ({
   targetEnvelope,
   poolEnvelope,
   poolBalance,
+  transfers,
   onRelease,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const [isExtraRelease, setIsExtraRelease] = useState(false)
+
+  // Critical fix: Reset state whenever modal opens or target envelope changes
+  useEffect(() => {
+    if (isOpen) {
+      setIsSubmitting(false)
+      setError(null)
+      setSuccessMsg(null)
+      setIsExtraRelease(false)
+    }
+  }, [isOpen, targetEnvelope?.id])
 
   if (!isOpen || !targetEnvelope || !poolEnvelope) return null
 
@@ -30,11 +48,20 @@ export const ReleaseModal: React.FC<ReleaseModalProps> = ({
   const hasEnoughFunds = poolBalance >= releaseAmount
   const shortage = Math.max(0, releaseAmount - poolBalance)
 
-  const dateStrings = getJakartaDateStrings()
-  const periodKey =
-    targetEnvelope.period_type === 'daily'
-      ? `release:daily:${dateStrings.todayStr}:${targetEnvelope.id}`
-      : `release:weekly:${dateStrings.weekStartStr}:${targetEnvelope.id}`
+  const isDaily = targetEnvelope.period_type === 'daily'
+  const isWeekly = targetEnvelope.period_type === 'weekly'
+
+  const allowanceStatus =
+    isDaily || isWeekly
+      ? checkAllowanceStatus(targetEnvelope.id, isDaily ? 'daily' : 'weekly', transfers)
+      : null
+
+  const alreadyReleased = Boolean(allowanceStatus?.isReleased)
+
+  // Determine period key (if extra release requested, append unique timestamp)
+  const periodKey = isExtraRelease
+    ? `${allowanceStatus?.currentPeriodKey}:extra-${Date.now()}`
+    : (allowanceStatus?.currentPeriodKey || `release:${targetEnvelope.period_type}:${Date.now()}:${targetEnvelope.id}`)
 
   const handleConfirm = async () => {
     setError(null)
@@ -45,7 +72,9 @@ export const ReleaseModal: React.FC<ReleaseModalProps> = ({
       if (!res.success) {
         setError(res.error || 'Gagal merilis alokasi.')
       } else {
-        setSuccessMsg(`Berhasil merilis ${formatRupiah(releaseAmount)} ke ${targetEnvelope.name}!`)
+        setSuccessMsg(
+          `Berhasil merilis ${formatRupiah(releaseAmount)} ke ${targetEnvelope.name}!`
+        )
         setTimeout(() => {
           onClose()
         }, 1200)
@@ -65,7 +94,12 @@ export const ReleaseModal: React.FC<ReleaseModalProps> = ({
             <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
               <Sparkles className="w-4 h-4" />
             </div>
-            <h2 className="text-base font-bold text-white">Rilis Tunjangan {targetEnvelope.name}</h2>
+            <div>
+              <h2 className="text-base font-bold text-white">Rilis Tunjangan {targetEnvelope.name}</h2>
+              <span className="text-[11px] text-slate-400 uppercase tracking-wider">
+                Periode {targetEnvelope.period_type}
+              </span>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -83,14 +117,28 @@ export const ReleaseModal: React.FC<ReleaseModalProps> = ({
 
         {successMsg && (
           <div className="mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            {successMsg}
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{successMsg}</span>
           </div>
         )}
 
         <div className="mt-4 space-y-4">
+          {/* Status banner when already released */}
+          {alreadyReleased && !successMsg && (
+            <div className="p-3.5 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 space-y-1.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>Tunjangan {allowanceStatus?.periodLabel} Sudah Pernah Dirilis</span>
+              </div>
+              <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>{allowanceStatus?.nextResetDescription}</span>
+              </p>
+            </div>
+          )}
+
           <p className="text-xs text-slate-400 leading-relaxed">
-            Sesuai aturan alokasi fleksibel, tunjangan ini akan ditarik dari pool sumber{' '}
+            Tunjangan ini ditarik dari pool sumber{' '}
             <strong className="text-slate-200">{poolEnvelope.name}</strong> tanpa mengubah saldo total uang Anda.
           </p>
 
@@ -117,13 +165,54 @@ export const ReleaseModal: React.FC<ReleaseModalProps> = ({
             </div>
           )}
 
+          {/* Option to release extra allowance if already released */}
+          {alreadyReleased && (
+            <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-white block">Perlu dana tambahan?</span>
+                <span className="text-[11px] text-slate-400">Cairkan ekstra di luar jadwal rutin</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExtraRelease(!isExtraRelease)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  isExtraRelease
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/20'
+                }`}
+              >
+                {isExtraRelease ? 'Mode Ekstra Aktif' : '+ Rilis Ekstra'}
+              </button>
+            </div>
+          )}
+
           <div className="pt-2">
             <button
               onClick={handleConfirm}
-              disabled={isSubmitting || !hasEnoughFunds || !!successMsg}
-              className="w-full py-3 rounded-xl font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/30 transition-all active:scale-[0.98] disabled:opacity-50"
+              disabled={
+                isSubmitting ||
+                !hasEnoughFunds ||
+                Boolean(successMsg) ||
+                (alreadyReleased && !isExtraRelease)
+              }
+              className={`w-full py-3 rounded-xl font-bold text-sm text-white transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 ${
+                isExtraRelease
+                  ? 'bg-amber-600 hover:bg-amber-500 shadow-lg shadow-amber-600/30'
+                  : 'bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/30'
+              }`}
             >
-              {isSubmitting ? 'Memproses Rilis...' : 'Rilis Tunjangan Sekarang'}
+              {isSubmitting ? (
+                'Memproses Rilis...'
+              ) : alreadyReleased && !isExtraRelease ? (
+                `Sudah Dirilis untuk ${allowanceStatus?.periodLabel}`
+              ) : isExtraRelease ? (
+                <>
+                  <PlusCircle className="w-4 h-4" />
+                  Rilis Tunjangan Tambahan ({formatRupiah(releaseAmount)})
+                </>
+              ) : (
+                'Rilis Tunjangan Sekarang'
+              )}
             </button>
           </div>
         </div>

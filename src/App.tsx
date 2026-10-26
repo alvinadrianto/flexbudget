@@ -47,6 +47,7 @@ const AppContent: React.FC = () => {
   const {
     summary,
     envelopes,
+    transfers,
     addTransaction,
     editTransaction,
     transferFunds,
@@ -161,6 +162,7 @@ const AppContent: React.FC = () => {
         initialType={txModalType}
         initialTransaction={editingTx}
         envelopes={envelopes}
+        envelopeBalances={summary?.envelopes || []}
       />
 
       <TransferModal
@@ -186,11 +188,13 @@ const AppContent: React.FC = () => {
       />
 
       <ReleaseModal
+        key={releaseTarget?.id ?? 'release'}
         isOpen={isReleaseModalOpen}
         onClose={() => setIsReleaseModalOpen(false)}
         targetEnvelope={releaseTarget}
         poolEnvelope={releasePool}
         poolBalance={releasePoolBal}
+        transfers={transfers}
         onRelease={releaseAllowance}
       />
 

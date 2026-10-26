@@ -125,22 +125,23 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
     return (
       <div
         key={env.id}
-        className={`p-5 rounded-3xl border transition-all ${
+        className={`p-5 sm:p-6 rounded-3xl border transition-all flex flex-col justify-between h-full ${
           isDeficit
             ? 'bg-rose-950/20 border-rose-500/50 shadow-lg shadow-rose-950/30'
             : 'bg-slate-900 border-slate-800 shadow-xl'
         }`}
       >
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <div className="flex items-center gap-2">
-              <h4 className="text-sm font-bold text-white">{env.name}</h4>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">
+        {/* Card Header with consistent min-height for title wrapping */}
+        <div className="flex items-start justify-between gap-3 min-h-[3.5rem]">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-base font-bold text-white leading-snug">{env.name}</h4>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 shrink-0">
                 {env.period_type}
               </span>
             </div>
             {pool && (
-              <p className="text-[11px] text-indigo-400 mt-0.5">
+              <p className="text-[11px] text-indigo-400 mt-1">
                 Didanai dari: <strong>{pool.name}</strong>
               </p>
             )}
@@ -148,7 +149,7 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
 
           <button
             onClick={() => openEditModal(env)}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
             title="Ubah Konfigurasi"
           >
             <Edit2 className="w-4 h-4" />
@@ -156,11 +157,11 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
         </div>
 
         {/* Balance and Progress */}
-        <div className="mt-4 space-y-2">
-          <div className="flex justify-between items-baseline">
-            <span className="text-xs text-slate-400">Saldo Amplop:</span>
+        <div className="mt-4 space-y-3 flex-1 flex flex-col justify-start">
+          <div className="flex justify-between items-baseline gap-2">
+            <span className="text-xs text-slate-400 shrink-0">Saldo Amplop:</span>
             <span
-              className={`text-xl font-extrabold font-mono ${
+              className={`text-xl font-extrabold font-mono text-right truncate ${
                 isDeficit ? 'text-rose-400' : 'text-slate-100'
               }`}
             >
@@ -169,23 +170,109 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
           </div>
 
           {/* Quick stats row */}
-          <div className="flex justify-between text-xs text-slate-400 pt-1 border-t border-slate-800/60">
-            <span>Terpakai: <strong className="text-slate-200 font-mono">{formatRupiah(spentAmount)}</strong></span>
-            {env.period_amount > 0 && (
-              <span>Target: <strong className="text-slate-200 font-mono">{formatRupiah(env.period_amount)}</strong></span>
+          <div className="pt-2 border-t border-slate-800/60">
+            {env.type === 'funding_pool' ? (
+              /* Pool card: show "Tersalurkan" (distributed) & "Bujet Pool" in clean 2-column box */
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-2 gap-3 p-3 rounded-2xl bg-slate-950/60 border border-slate-800/80">
+                  <div>
+                    <span className="text-[11px] font-medium text-slate-400 block">Tersalurkan</span>
+                    <span className="text-sm font-bold font-mono text-amber-400 mt-0.5 block truncate">
+                      {formatRupiah(info.poolReleasedOut || 0)}
+                    </span>
+                  </div>
+                  {env.period_amount > 0 ? (
+                    <div className="text-right">
+                      <span className="text-[11px] font-medium text-slate-400 block">Bujet Pool</span>
+                      <span className="text-sm font-bold font-mono text-slate-200 mt-0.5 block truncate">
+                        {formatRupiah(env.period_amount)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-right">
+                      <span className="text-[11px] font-medium text-slate-400 block">Bujet Pool</span>
+                      <span className="text-sm font-bold font-mono text-slate-500 mt-0.5 block">-</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Progress bar: released vs pool period_amount */}
+                {env.period_amount > 0 && (
+                  <div className="space-y-1">
+                    <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          (info.poolReleasedOut || 0) >= env.period_amount ? 'bg-rose-500' : 'bg-amber-500'
+                        }`}
+                        style={{ width: `${Math.min(100, ((info.poolReleasedOut || 0) / env.period_amount) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[11px] text-slate-500 font-mono">
+                      <span>{Math.round(((info.poolReleasedOut || 0) / env.period_amount) * 100)}% tersalurkan</span>
+                      <span>Sisa bujet: {formatRupiah(Math.max(0, env.period_amount - (info.poolReleasedOut || 0)))}</span>
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-slate-500 italic flex items-center gap-1.5 pt-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500/70 shrink-0" />
+                  Pool hanya menyalurkan dana — pengeluaran aktual ada di amplop anak
+                </p>
+              </div>
+            ) : (
+              /* Spending/savings/emergency card: show "Terpakai" */
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-400 gap-2">
+                  <span className="truncate">
+                    Terpakai: <strong className="text-slate-200 font-mono">{formatRupiah(spentAmount)}</strong>
+                  </span>
+                  {env.period_amount > 0 && (
+                    <span className="shrink-0 text-right">
+                      Target: <strong className="text-slate-200 font-mono">{formatRupiah(env.period_amount)}</strong>
+                    </span>
+                  )}
+                </div>
+
+                {/* Target progress bar */}
+                {env.period_amount > 0 && (
+                  <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        spentAmount > env.period_amount ? 'bg-rose-500' : 'bg-indigo-500'
+                      }`}
+                      style={{ width: `${Math.min(100, (spentAmount / env.period_amount) * 100)}%` }}
+                    />
+                  </div>
+                )}
+
+                {Boolean(info.deficitCoverGiven && info.deficitCoverGiven > 0) && (
+                  <div className="text-[10px] text-amber-400 flex items-center justify-between pt-0.5">
+                    <span>↳ Termasuk tutup defisit:</span>
+                    <span className="font-mono font-semibold">{formatRupiah(info.deficitCoverGiven || 0)}</span>
+                  </div>
+                )}
+                {Boolean(info.deficitCoverReceived && info.deficitCoverReceived > 0) && (
+                  <div className="text-[10px] text-emerald-400 flex items-center justify-between pt-0.5">
+                    <span>↳ Defisit ditutup amplop lain:</span>
+                    <span className="font-mono font-semibold">+{formatRupiah(info.deficitCoverReceived || 0)}</span>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
+
+
           {env.min_protected_balance > 0 && (
-            <div className="flex items-center gap-1 text-[11px] text-amber-400 bg-amber-400/10 px-2 py-1 rounded-xl">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              Proteksi minimum {formatRupiah(env.min_protected_balance)}
+            <div className="flex items-center gap-1 text-[11px] text-amber-400 bg-amber-400/10 px-2.5 py-1.5 rounded-xl mt-auto">
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+              <span>Proteksi minimum {formatRupiah(env.min_protected_balance)}</span>
             </div>
           )}
         </div>
 
         {/* Action Buttons */}
-        <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap gap-2">
+        <div className="mt-5 pt-3 border-t border-slate-800/80 flex flex-wrap gap-2 mt-auto">
           {isDeficit ? (
             <button
               onClick={() => onOpenDeficit(info)}
@@ -270,7 +357,7 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
               Tunjangan Berulang (Harian & Mingguan)
             </h3>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {allowanceEnvelopes.map(renderEnvelopeCard)}
           </div>
         </section>
@@ -287,7 +374,7 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
               Anggaran Pengeluaran Bulanan
             </h3>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {monthlyEnvelopes.map(renderEnvelopeCard)}
           </div>
         </section>
@@ -304,7 +391,7 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
               Tabungan & Dana Darurat (Protected)
             </h3>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {savingsEnvelopes.map(renderEnvelopeCard)}
           </div>
         </section>
@@ -321,10 +408,39 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
               Pool Pendanaan (Funding Pools)
             </h3>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {poolEnvelopes.map(renderEnvelopeCard)}
           </div>
         </section>
+      )}
+
+      {/* Empty State when no envelopes exist */}
+      {envelopes.length === 0 && (
+        <div className="p-8 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-4 max-w-lg mx-auto my-12">
+          <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto">
+            <Wallet className="w-7 h-7" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-white">Belum Ada Amplop Anggaran</h3>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              Data amplop Anda saat ini kosong. Anda dapat menerapkan template anggaran fleksibel siap pakai atau membuat amplop kustom sendiri.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <button
+              onClick={loadInitialTemplate}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition-all active:scale-95"
+            >
+              <Sparkles className="w-4 h-4" /> Terapkan Template Siap Pakai
+            </button>
+            <button
+              onClick={openCreateModal}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" /> Buat Amplop Baru
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Envelope Modal (Create or Edit) */}

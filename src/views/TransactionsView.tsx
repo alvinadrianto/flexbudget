@@ -7,9 +7,13 @@ import {
   Receipt,
   ArrowDownRight,
   ArrowUpRight,
+  ShieldAlert,
+  ArrowRightLeft,
+  ShieldCheck,
+  Sparkles,
 } from 'lucide-react'
 import { formatRupiah } from '../services/financialEngine'
-import type { Transaction, TransactionType } from '../types/finance'
+import type { Transaction, TransactionType, Transfer } from '../types/finance'
 import { useFinance } from '../context/FinanceContext'
 
 interface TransactionsViewProps {
@@ -17,35 +21,125 @@ interface TransactionsViewProps {
   onEditTransaction: (tx: Transaction) => void
 }
 
+type CombinedItem =
+  | {
+      kind: 'transaction'
+      id: string
+      date: string
+      createdAt: string
+      tx: Transaction
+    }
+  | {
+      kind: 'transfer'
+      id: string
+      date: string
+      createdAt: string
+      tr: Transfer
+    }
+
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
   onOpenAddModal,
   onEditTransaction,
 }) => {
-  const { transactions, envelopes, removeTransaction } = useFinance()
+  const { transactions, envelopes, transfers, summary, removeTransaction } = useFinance()
   const [search, setSearch] = useState('')
-  const [selectedType, setSelectedType] = useState<'all' | TransactionType>('all')
+  const [selectedType, setSelectedType] = useState<
+    'all' | 'expense' | 'income' | 'deficit' | 'transfers'
+  >('all')
   const [selectedEnvelope, setSelectedEnvelope] = useState<string>('all')
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  // Filtering
-  const filtered = transactions.filter((tx) => {
-    // Type filter
-    if (selectedType !== 'all' && tx.type !== selectedType) return false
+  // Calculate totals
+  const totalIncome = summary?.totalIncome || 0
+  const totalExpense = summary?.totalExpenses || 0
+  const deficitCoveredTotal = transfers
+    .filter((t) => t.type === 'deficit_coverage')
+    .reduce((sum, t) => sum + t.amount, 0)
 
-    // Envelope filter
+  // Map transactions to combined items
+  const txItems: CombinedItem[] = transactions.map((tx) => ({
+    kind: 'transaction',
+    id: `tx-${tx.id}`,
+    date: tx.date,
+    createdAt: tx.created_at || tx.date,
+    tx,
+  }))
+
+  // Map transfers to combined items
+  const transferItems: CombinedItem[] = transfers.map((tr) => ({
+    kind: 'transfer',
+    id: `tr-${tr.id}`,
+    date: tr.created_at.slice(0, 10),
+    createdAt: tr.created_at,
+    tr,
+  }))
+
+  // Combine and sort descending by date / created_at
+  const allItems: CombinedItem[] = [...txItems, ...transferItems].sort((a, b) => {
+    if (a.date !== b.date) {
+      return b.date.localeCompare(a.date)
+    }
+    return b.createdAt.localeCompare(a.createdAt)
+  })
+
+  // Filtering
+  const filtered = allItems.filter((item) => {
+    // Type Filter
+    if (selectedType === 'expense') {
+      if (item.kind !== 'transaction' || item.tx.type !== 'expense') return false
+    } else if (selectedType === 'income') {
+      if (item.kind !== 'transaction' || item.tx.type !== 'income') return false
+    } else if (selectedType === 'deficit') {
+      if (item.kind !== 'transfer' || item.tr.type !== 'deficit_coverage') return false
+    } else if (selectedType === 'transfers') {
+      if (item.kind !== 'transfer') return false
+    }
+
+    // Envelope Filter
     if (selectedEnvelope !== 'all') {
-      if (selectedEnvelope === 'none' && tx.envelope_id !== null) return false
-      if (selectedEnvelope !== 'none' && tx.envelope_id !== selectedEnvelope) return false
+      if (selectedEnvelope === 'none') {
+        if (item.kind === 'transaction' && item.tx.envelope_id !== null) return false
+        if (item.kind === 'transfer') return false
+      } else {
+        if (item.kind === 'transaction' && item.tx.envelope_id !== selectedEnvelope) return false
+        if (
+          item.kind === 'transfer' &&
+          item.tr.source_envelope_id !== selectedEnvelope &&
+          item.tr.destination_envelope_id !== selectedEnvelope
+        ) {
+          return false
+        }
+      }
     }
 
     // Search query
     if (search.trim()) {
       const q = search.toLowerCase()
-      const matchDesc = tx.description.toLowerCase().includes(q)
-      const matchNotes = (tx.notes || '').toLowerCase().includes(q)
-      const matchAmount = tx.amount.toString().includes(q)
-      if (!matchDesc && !matchNotes && !matchAmount) return false
+      if (item.kind === 'transaction') {
+        const matchDesc = item.tx.description.toLowerCase().includes(q)
+        const matchNotes = (item.tx.notes || '').toLowerCase().includes(q)
+        const matchAmount = item.tx.amount.toString().includes(q)
+        const envName =
+          envelopes.find((e) => e.id === item.tx.envelope_id)?.name.toLowerCase() || ''
+        const matchEnv = envName.includes(q)
+        const matchDeficitTag = q.includes('defisit') && (matchDesc || matchNotes || matchEnv)
+        if (!matchDesc && !matchNotes && !matchAmount && !matchEnv && !matchDeficitTag) {
+          return false
+        }
+      } else {
+        const matchDesc = item.tr.description.toLowerCase().includes(q)
+        const matchAmount = item.tr.amount.toString().includes(q)
+        const srcEnv =
+          envelopes.find((e) => e.id === item.tr.source_envelope_id)?.name.toLowerCase() || ''
+        const dstEnv =
+          envelopes.find((e) => e.id === item.tr.destination_envelope_id)?.name.toLowerCase() || ''
+        const matchDeficit =
+          item.tr.type === 'deficit_coverage' && (q.includes('defisit') || q.includes('tutup'))
+        if (!matchDesc && !matchAmount && !srcEnv.includes(q) && !dstEnv.includes(q) && !matchDeficit) {
+          return false
+        }
+      }
     }
 
     return true
@@ -66,9 +160,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       {/* Header & Quick Action */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-extrabold text-white">Transaksi Keuangan</h2>
+          <h2 className="text-xl font-extrabold text-white">Riwayat Transaksi & Mutasi</h2>
           <p className="text-xs text-slate-400">
-            Catatan historis pemasukan dan pengeluaran terlacak ({filtered.length} transaksi)
+            Jurnal lengkap arus kas masuk, pengeluaran, penutupan defisit, dan mutasi anggaran ({filtered.length} entri)
           </p>
         </div>
 
@@ -88,6 +182,45 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         </div>
       </div>
 
+      {/* Summary Stat Badges */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+          <div>
+            <span className="text-[11px] text-slate-400 block font-medium">Total Pemasukan</span>
+            <span className="text-sm font-extrabold font-mono text-emerald-400">
+              +{formatRupiah(totalIncome)}
+            </span>
+          </div>
+          <span className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+            <ArrowUpRight className="w-4 h-4" />
+          </span>
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+          <div>
+            <span className="text-[11px] text-slate-400 block font-medium">Total Pengeluaran</span>
+            <span className="text-sm font-extrabold font-mono text-rose-400">
+              -{formatRupiah(totalExpense)}
+            </span>
+          </div>
+          <span className="w-8 h-8 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+            <ArrowDownRight className="w-4 h-4" />
+          </span>
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+          <div>
+            <span className="text-[11px] text-slate-400 block font-medium">Defisit Tertutup</span>
+            <span className="text-sm font-extrabold font-mono text-amber-400">
+              {formatRupiah(deficitCoveredTotal)}
+            </span>
+          </div>
+          <span className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+            <ShieldCheck className="w-4 h-4" />
+          </span>
+        </div>
+      </div>
+
       {/* Filter and Search Bar */}
       <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-3">
         <div className="flex flex-col sm:flex-row items-stretch gap-3">
@@ -100,7 +233,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cari deskripsi, catatan, atau nominal..."
+              placeholder="Cari deskripsi, catatan, amplop, atau defisit..."
               className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none"
             />
           </div>
@@ -111,9 +244,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             onChange={(e) => setSelectedType(e.target.value as any)}
             className="bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-2.5 text-xs text-slate-300 focus:outline-none"
           >
-            <option value="all">Semua Tipe</option>
-            <option value="expense">Hanya Pengeluaran</option>
-            <option value="income">Hanya Pemasukan</option>
+            <option value="all">Semua Aktivitas</option>
+            <option value="expense">Hanya Pengeluaran Kas</option>
+            <option value="income">Hanya Pemasukan Kas</option>
+            <option value="deficit">Hanya Penutupan Defisit</option>
+            <option value="transfers">Mutasi & Transfer Amplop</option>
           </select>
 
           {/* Envelope Filter */}
@@ -123,7 +258,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             className="bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-2.5 text-xs text-slate-300 focus:outline-none"
           >
             <option value="all">Semua Amplop</option>
-            <option value="none">Tanpa Amplop (Saldo Terlacak)</option>
+            <option value="none">Tanpa Amplop (Saldo Bebas)</option>
             {envelopes.map((env) => (
               <option key={env.id} value={env.id}>
                 {env.name}
@@ -133,90 +268,189 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         </div>
       </div>
 
-      {/* Transactions List Table / Cards */}
+      {/* Activity List Table / Cards */}
       <div className="rounded-3xl bg-slate-900 border border-slate-800 shadow-xl overflow-hidden">
         {filtered.length === 0 ? (
           <div className="py-16 text-center text-xs text-slate-500 space-y-2">
             <Receipt className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-            <p>Tidak ada transaksi yang cocok dengan filter saat ini.</p>
+            <p>Tidak ada transaksi atau mutasi yang cocok dengan filter saat ini.</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-800/80">
-            {filtered.map((tx) => {
-              const env = envelopes.find((e) => e.id === tx.envelope_id)
-              const isIncome = tx.type === 'income'
+            {filtered.map((item) => {
+              if (item.kind === 'transaction') {
+                const tx = item.tx
+                const env = envelopes.find((e) => e.id === tx.envelope_id)
+                const isIncome = tx.type === 'income'
 
-              return (
-                <div
-                  key={tx.id}
-                  className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-950/40 transition-colors"
-                >
-                  <div className="flex items-start gap-3.5">
-                    <div
-                      className={`w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 mt-0.5 ${
-                        isIncome
-                          ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
-                          : 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
-                      }`}
-                    >
-                      {isIncome ? (
-                        <ArrowUpRight className="w-5 h-5" />
-                      ) : (
-                        <ArrowDownRight className="w-5 h-5" />
-                      )}
+                return (
+                  <div
+                    key={item.id}
+                    className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-950/40 transition-colors"
+                  >
+                    <div className="flex items-start gap-3.5">
+                      <div
+                        className={`w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 mt-0.5 ${
+                          isIncome
+                            ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                            : 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
+                        }`}
+                      >
+                        {isIncome ? (
+                          <ArrowUpRight className="w-5 h-5" />
+                        ) : (
+                          <ArrowDownRight className="w-5 h-5" />
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-sm font-bold text-white block leading-tight">
+                          {tx.description}
+                        </span>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                          <span className="font-mono">{tx.date}</span>
+                          <span>•</span>
+                          <span className="text-indigo-400 font-medium">
+                            {env ? env.name : 'Saldo Bebas'}
+                          </span>
+                          {tx.notes && (
+                            <>
+                              <span>•</span>
+                              <span className="text-slate-500 italic max-w-xs truncate">
+                                {tx.notes}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
-                    <div>
-                      <span className="text-sm font-bold text-white block leading-tight">
-                        {tx.description}
+                    <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-800/50">
+                      <span
+                        className={`text-base font-extrabold font-mono ${
+                          isIncome ? 'text-emerald-400' : 'text-slate-100'
+                        }`}
+                      >
+                        {isIncome ? '+' : '-'}
+                        {formatRupiah(tx.amount)}
                       </span>
-                      <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-slate-400">
-                        <span className="font-mono">{tx.date}</span>
-                        <span>•</span>
-                        <span className="text-indigo-400 font-medium">
-                          {env ? env.name : 'Saldo Terlacak'}
-                        </span>
-                        {tx.notes && (
-                          <>
-                            <span>•</span>
-                            <span className="text-slate-500 italic max-w-xs truncate">{tx.notes}</span>
-                          </>
-                        )}
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => onEditTransaction(tx)}
+                          className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                          title="Ubah Transaksi"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          onClick={() => setDeleteConfirmId(tx.id)}
+                          className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                          title="Hapus Transaksi"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
                   </div>
+                )
+              } else {
+                // Item is a TRANSFER / MUTASI (e.g. Deficit coverage, Pool release, Surplus routing)
+                const tr = item.tr
+                const srcEnv = envelopes.find((e) => e.id === tr.source_envelope_id)
+                const dstEnv = envelopes.find((e) => e.id === tr.destination_envelope_id)
+                const isDeficitCoverage = tr.type === 'deficit_coverage'
+                const isPoolRelease = tr.type === 'pool_release'
+                const isSurplus = tr.type === 'surplus_routing'
 
-                  <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-800/50">
-                    <span
-                      className={`text-base font-extrabold font-mono ${
-                        isIncome ? 'text-emerald-400' : 'text-slate-100'
-                      }`}
-                    >
-                      {isIncome ? '+' : '-'}
-                      {formatRupiah(tx.amount)}
-                    </span>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => onEditTransaction(tx)}
-                        className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                        title="Ubah Transaksi"
+                return (
+                  <div
+                    key={item.id}
+                    className={`p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
+                      isDeficitCoverage
+                        ? 'bg-amber-950/15 hover:bg-amber-950/25'
+                        : 'hover:bg-slate-950/40'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3.5">
+                      <div
+                        className={`w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 mt-0.5 ${
+                          isDeficitCoverage
+                            ? 'bg-amber-500/15 border border-amber-500/30 text-amber-400'
+                            : isPoolRelease
+                            ? 'bg-indigo-500/15 border border-indigo-500/30 text-indigo-400'
+                            : isSurplus
+                            ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400'
+                            : 'bg-purple-500/15 border border-purple-500/30 text-purple-400'
+                        }`}
                       >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
+                        {isDeficitCoverage ? (
+                          <ShieldAlert className="w-5 h-5" />
+                        ) : isPoolRelease ? (
+                          <Sparkles className="w-5 h-5" />
+                        ) : (
+                          <ArrowRightLeft className="w-5 h-5" />
+                        )}
+                      </div>
 
-                      <button
-                        onClick={() => setDeleteConfirmId(tx.id)}
-                        className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                        title="Hapus Transaksi"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-white leading-tight">
+                            {tr.description}
+                          </span>
+                          {isDeficitCoverage && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300">
+                              🛡️ Tutup Defisit
+                            </span>
+                          )}
+                          {isPoolRelease && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300">
+                              Rilis Tunjangan
+                            </span>
+                          )}
+                          {isSurplus && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300">
+                              Simpan Surplus
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                          <span className="font-mono">{item.date}</span>
+                          <span>•</span>
+                          <span className="font-semibold text-slate-300">
+                            {srcEnv ? srcEnv.name : 'Saldo Bebas'}
+                          </span>
+                          <span>➔</span>
+                          <span className="font-semibold text-indigo-300">
+                            {dstEnv ? dstEnv.name : 'Saldo Bebas'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-800/50">
+                      <div className="text-right">
+                        <span
+                          className={`text-base font-extrabold font-mono block ${
+                            isDeficitCoverage
+                              ? 'text-amber-400'
+                              : 'text-indigo-300'
+                          }`}
+                        >
+                          {formatRupiah(tr.amount)}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {isDeficitCoverage ? 'Dialihkan untuk defisit' : 'Mutasi Amplop'}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
+                )
+              }
             })}
           </div>
         )}

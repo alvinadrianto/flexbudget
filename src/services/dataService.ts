@@ -518,4 +518,41 @@ export class DataService {
       backup.deficit_rules?.map((r) => ({ ...r, user_id: userId })) || []
     )
   }
+
+  /**
+   * Reset all financial data for user (wipes transactions, transfers, deficit rules, envelopes, and resets opening balance to 0)
+   */
+  static async resetAllData(userId: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      // Delete child records first to satisfy foreign key constraints
+      const { error: txErr } = await supabase.from('transactions').delete().eq('user_id', userId)
+      if (txErr) console.warn('Supabase delete transactions warning:', txErr.message)
+
+      const { error: trErr } = await supabase.from('transfers').delete().eq('user_id', userId)
+      if (trErr) console.warn('Supabase delete transfers warning:', trErr.message)
+
+      const { error: ruleErr } = await supabase.from('deficit_rules').delete().eq('user_id', userId)
+      if (ruleErr) console.warn('Supabase delete deficit_rules warning:', ruleErr.message)
+
+      const { error: envErr } = await supabase.from('envelopes').delete().eq('user_id', userId)
+      if (envErr) console.warn('Supabase delete envelopes warning:', envErr.message)
+
+      // Reset profile opening balance to 0
+      const { error: profErr } = await supabase.from('profiles').update({ opening_balance: 0 }).eq('id', userId)
+      if (profErr) console.warn('Supabase reset profile opening_balance warning:', profErr.message)
+    }
+
+    // Always clear local data as well
+    setLocalData('envelopes', [])
+    setLocalData('transactions', [])
+    setLocalData('transfers', [])
+    setLocalData('deficit_rules', [])
+    setLocalData('period_reviews', [])
+
+    const localProfile = getLocalData<Profile | null>('profile', null)
+    if (localProfile) {
+      setLocalData('profile', { ...localProfile, opening_balance: 0 })
+    }
+  }
 }
+

@@ -898,4 +898,237 @@ describe('FlexBudget Financial Engine & Accounting Invariants', () => {
     expect(formatRupiah(-50000)).toBe('-Rp50.000')
     expect(formatRupiah(0)).toBe('Rp0')
   })
+
+  it('18. Covering a deficit increases spentAmount (terpakai) on the source envelope', () => {
+    const template = getInitialBudgetTemplate(userId)
+    const dailySpending = template.envelopes.find((e) => e.id === 'env-daily-spending')!
+    const emergencyFund = template.envelopes.find((e) => e.id === 'env-emergency-fund')!
+
+    // Initial allocations: Emergency fund gets Rp305.000, Daily spending gets Rp30.000 release
+    const initialTransfers: Transfer[] = [
+      {
+        id: 'tr-alloc-emergency',
+        user_id: userId,
+        type: 'allocation',
+        source_envelope_id: null,
+        destination_envelope_id: emergencyFund.id,
+        amount: 305000,
+        description: 'Alokasi Dana Darurat',
+        created_at: '2026-10-01T08:00:00Z',
+      },
+      {
+        id: 'tr-release-daily',
+        user_id: userId,
+        type: 'pool_release',
+        source_envelope_id: 'pool-daily-spending',
+        destination_envelope_id: dailySpending.id,
+        amount: 30000,
+        description: 'Rilis Harian',
+        created_at: '2026-10-01T08:00:00Z',
+      },
+    ]
+
+    // Daily spending overspends by Rp20.000 (spent Rp50.000 when balance is Rp30.000)
+    const transactions: Transaction[] = [
+      {
+        id: 'tx-overspend',
+        user_id: userId,
+        type: 'expense',
+        amount: 50000,
+        date: '2026-10-01',
+        envelope_id: dailySpending.id,
+        description: 'Makan Bersama Teman',
+      },
+    ]
+
+    // Before deficit coverage:
+    const summaryBefore = generateFinancialSummary(mockProfile, template.envelopes, transactions, initialTransfers)
+    const dailyBefore = summaryBefore.envelopes.find((e) => e.envelope.id === dailySpending.id)!
+    const emergencyBefore = summaryBefore.envelopes.find((e) => e.envelope.id === emergencyFund.id)!
+
+    expect(dailyBefore.balance).toBe(-20000) // in deficit
+    expect(dailyBefore.isDeficit).toBe(true)
+    expect(emergencyBefore.spentAmount).toBe(0) // Emergency fund has not spent anything yet
+
+    // Emergency fund covers the Rp20.000 deficit
+    const coverageTransfer: Transfer = {
+      id: 'tr-cover-1',
+      user_id: userId,
+      type: 'deficit_coverage',
+      source_envelope_id: emergencyFund.id,
+      destination_envelope_id: dailySpending.id,
+      amount: 20000,
+      description: 'Menutup defisit Makan Bersama Teman',
+      related_transaction_id: 'tx-overspend',
+      created_at: '2026-10-01T09:00:00Z',
+    }
+
+    const allTransfers = [...initialTransfers, coverageTransfer]
+    const summaryAfter = generateFinancialSummary(mockProfile, template.envelopes, transactions, allTransfers)
+    const dailyAfter = summaryAfter.envelopes.find((e) => e.envelope.id === dailySpending.id)!
+    const emergencyAfter = summaryAfter.envelopes.find((e) => e.envelope.id === emergencyFund.id)!
+
+    // Daily envelope deficit is now fully resolved (balance is 0)
+    expect(dailyAfter.balance).toBe(0)
+    expect(dailyAfter.isDeficit).toBe(false)
+    expect(dailyAfter.spentAmount).toBe(50000)
+
+    // Source envelope (emergency fund) balance decreased by 20.000 AND its spentAmount (terpakai) increased by 20.000!
+    expect(emergencyAfter.balance).toBe(285000)
+    expect(emergencyAfter.spentAmount).toBe(20000)
+    expect(emergencyAfter.deficitCoverGiven).toBe(20000)
+
+    // Overall invariant holds true
+    expect(summaryAfter.accountingInvariantValid).toBe(true)
+  })
+
+  it('19. Automatic deficit coverage uses the linked funding pool first before touching emergency/savings', () => {
+    const template = getInitialBudgetTemplate(userId)
+    const dailySpending = template.envelopes.find((e) => e.id === 'env-daily-spending')!
+    const dailyPool = template.envelopes.find((e) => e.id === 'pool-daily-spending')!
+    const emergencyFund = template.envelopes.find((e) => e.id === 'env-emergency-fund')!
+
+    // Pool has Rp900.000, Emergency has Rp305.000, Daily has released Rp30.000
+    const initialTransfers: Transfer[] = [
+      {
+        id: 'tr-pool-init',
+        user_id: userId,
+        type: 'allocation',
+        source_envelope_id: null,
+        destination_envelope_id: dailyPool.id,
+        amount: 900000,
+        description: 'Alokasi Pool',
+        created_at: '2026-10-01T08:00:00Z',
+      },
+      {
+        id: 'tr-daily-rel',
+        user_id: userId,
+        type: 'pool_release',
+        source_envelope_id: dailyPool.id,
+        destination_envelope_id: dailySpending.id,
+        amount: 30000,
+        description: 'Rilis Hari 1',
+        created_at: '2026-10-01T08:00:00Z',
+      },
+      {
+        id: 'tr-emergency-init',
+        user_id: userId,
+        type: 'allocation',
+        source_envelope_id: null,
+        destination_envelope_id: emergencyFund.id,
+        amount: 305000,
+        description: 'Alokasi Emergency',
+        created_at: '2026-10-01T08:00:00Z',
+      },
+    ]
+
+    // Daily spending overspends by Rp15.000 (spent Rp45.000 when balance is Rp30.000)
+    const transactions: Transaction[] = [
+      {
+        id: 'tx-overspend-auto',
+        user_id: userId,
+        type: 'expense',
+        amount: 45000,
+        date: '2026-10-01',
+        envelope_id: dailySpending.id,
+        description: 'Makan Siang Spesial',
+      },
+    ]
+
+    const summary = generateFinancialSummary(mockProfile, template.envelopes, transactions, initialTransfers)
+    const dailyInfo = summary.envelopes.find((e) => e.envelope.id === dailySpending.id)!
+    expect(dailyInfo.isDeficit).toBe(true)
+    expect(dailyInfo.deficitAmount).toBe(15000)
+
+    // Run coverDeficitAuto with NO custom rules configured:
+    const autoResult = coverDeficitAuto({
+      userId,
+      deficitEnvelope: dailySpending,
+      deficitAmount: dailyInfo.deficitAmount,
+      envelopeBalances: summary.envelopes,
+      rules: [], // No custom rules!
+    })
+
+    expect(autoResult.success).toBe(true)
+    expect(autoResult.coveredTotal).toBe(15000)
+    expect(autoResult.remainingDeficit).toBe(0)
+    expect(autoResult.transfers.length).toBe(1)
+
+    // MUST have pulled from the linked parent pool (Daily Spending Pool), NOT from emergency fund or monthly spending!
+    expect(autoResult.transfers[0].source_envelope_id).toBe(dailyPool.id)
+    expect(autoResult.transfers[0].amount).toBe(15000)
+    expect(autoResult.summaryLog[0]).toContain(dailyPool.name)
+  })
+
+  it('20. Automatic deficit coverage uses weekly jajan allowance before touching emergency funds', () => {
+    const template = getInitialBudgetTemplate(userId)
+    const dailySpending = template.envelopes.find((e) => e.id === 'env-daily-spending')!
+    const weeklyJajan = template.envelopes.find((e) => e.id === 'env-weekly-jajan')!
+    const emergencyFund = template.envelopes.find((e) => e.id === 'env-emergency-fund')!
+
+    // Assume all pools are empty (0 balance), but Weekly Jajan has Rp200.000 released, Emergency has Rp305.000
+    const initialTransfers: Transfer[] = [
+      {
+        id: 'tr-weekly-rel',
+        user_id: userId,
+        type: 'pool_release',
+        source_envelope_id: 'pool-weekly-jajan',
+        destination_envelope_id: weeklyJajan.id,
+        amount: 200000,
+        description: 'Rilis Jajan Minggu Ini',
+        created_at: '2026-10-01T08:00:00Z',
+      },
+      {
+        id: 'tr-emergency-init',
+        user_id: userId,
+        type: 'allocation',
+        source_envelope_id: null,
+        destination_envelope_id: emergencyFund.id,
+        amount: 305000,
+        description: 'Alokasi Emergency',
+        created_at: '2026-10-01T08:00:00Z',
+      },
+      {
+        id: 'tr-daily-rel',
+        user_id: userId,
+        type: 'pool_release',
+        source_envelope_id: 'pool-daily-spending',
+        destination_envelope_id: dailySpending.id,
+        amount: 30000,
+        description: 'Rilis Hari 1',
+        created_at: '2026-10-01T08:00:00Z',
+      },
+    ]
+
+    // Daily spending overspends by Rp10.000 (spent Rp40.000 when balance is Rp30.000)
+    const transactions: Transaction[] = [
+      {
+        id: 'tx-overspend-jajan',
+        user_id: userId,
+        type: 'expense',
+        amount: 40000,
+        date: '2026-10-01',
+        envelope_id: dailySpending.id,
+        description: 'Makan Tambah Lauk',
+      },
+    ]
+
+    const summary = generateFinancialSummary(mockProfile, template.envelopes, transactions, initialTransfers)
+    const dailyInfo = summary.envelopes.find((e) => e.envelope.id === dailySpending.id)!
+
+    // Run coverDeficitAuto with NO custom rules:
+    const autoResult = coverDeficitAuto({
+      userId,
+      deficitEnvelope: dailySpending,
+      deficitAmount: dailyInfo.deficitAmount,
+      envelopeBalances: summary.envelopes,
+      rules: [],
+    })
+
+    expect(autoResult.success).toBe(true)
+    expect(autoResult.coveredTotal).toBe(10000)
+    // Must have pulled from Weekly Jajan (tunjangan mingguan), NOT touching emergency funds!
+    expect(autoResult.transfers[0].source_envelope_id).toBe(weeklyJajan.id)
+    expect(autoResult.summaryLog.some((log) => log.includes(weeklyJajan.name))).toBe(true)
+  })
 })

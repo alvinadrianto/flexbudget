@@ -89,6 +89,10 @@ export function calculateEnvelopeBalances(
   const creditsMap = new Map<string, number>()
   const debitsMap = new Map<string, number>()
   const expensesMap = new Map<string, number>()
+  const deficitCoverGivenMap = new Map<string, number>()
+  const deficitCoverReceivedMap = new Map<string, number>()
+  // Track only pool_release transfers flowing OUT of each envelope (for funding_pool spentAmount)
+  const poolReleasedOutMap = new Map<string, number>()
 
   for (const tr of transfers) {
     const amt = Math.max(0, Math.round(tr.amount))
@@ -97,12 +101,31 @@ export function calculateEnvelopeBalances(
         tr.destination_envelope_id,
         (creditsMap.get(tr.destination_envelope_id) || 0) + amt
       )
+      if (tr.type === 'deficit_coverage') {
+        deficitCoverReceivedMap.set(
+          tr.destination_envelope_id,
+          (deficitCoverReceivedMap.get(tr.destination_envelope_id) || 0) + amt
+        )
+      }
     }
     if (tr.source_envelope_id) {
       debitsMap.set(
         tr.source_envelope_id,
         (debitsMap.get(tr.source_envelope_id) || 0) + amt
       )
+      if (tr.type === 'deficit_coverage') {
+        deficitCoverGivenMap.set(
+          tr.source_envelope_id,
+          (deficitCoverGivenMap.get(tr.source_envelope_id) || 0) + amt
+        )
+      }
+      // Track pool_release outflows separately for funding_pool "terpakai"
+      if (tr.type === 'pool_release') {
+        poolReleasedOutMap.set(
+          tr.source_envelope_id,
+          (poolReleasedOutMap.get(tr.source_envelope_id) || 0) + amt
+        )
+      }
     }
   }
 
@@ -119,9 +142,24 @@ export function calculateEnvelopeBalances(
   return envelopes.map((env) => {
     const transferredIn = creditsMap.get(env.id) || 0
     const transferredOut = debitsMap.get(env.id) || 0
-    const spentAmount = expensesMap.get(env.id) || 0
+    const directExpenses = expensesMap.get(env.id) || 0
+    const deficitCoverGiven = deficitCoverGivenMap.get(env.id) || 0
+    const deficitCoverReceived = deficitCoverReceivedMap.get(env.id) || 0
+    const poolReleasedOut = poolReleasedOutMap.get(env.id) || 0
 
-    const balance = transferredIn - transferredOut - spentAmount
+    // Balance formula: sum of transfers in - sum of transfers out - direct expenses
+    const balance = transferredIn - transferredOut - directExpenses
+
+    /**
+     * "Terpakai" (spentAmount):
+     * Always = directExpenses + deficitCoverGiven for all envelope types.
+     *
+     * Funding pools never receive direct expense transactions, so their spentAmount = 0
+     * (unless they exceptionally provide deficit coverage to another envelope).
+     * The "distributed" amount for a pool is exposed separately as poolReleasedOut.
+     */
+    const spentAmount = directExpenses + deficitCoverGiven
+
     const isDeficit = balance < 0
     const deficitAmount = isDeficit ? Math.abs(balance) : 0
     const availableSurplus = Math.max(
@@ -133,14 +171,20 @@ export function calculateEnvelopeBalances(
       envelope: env,
       balance,
       spentAmount,
+      directExpenses,
+      deficitCoverGiven,
+      deficitCoverReceived,
+      poolReleasedOut: env.type === 'funding_pool' ? poolReleasedOut : undefined,
       transferredIn,
       transferredOut,
       isDeficit,
       deficitAmount,
       availableSurplus,
     }
+
   })
 }
+
 
 /**
  * Filter transactions by timeframe (today, this week, this month)
@@ -175,6 +219,76 @@ export function getJakartaDateStrings(now = new Date()): {
     todayStr,
     weekStartStr,
     monthStartStr,
+  }
+}
+
+export interface AllowancePeriodStatus {
+  isReleased: boolean
+  currentPeriodKey: string
+  lastReleasedAt?: string
+  lastReleasedAmount?: number
+  nextResetDescription: string
+  periodLabel: string
+}
+
+/**
+ * Check whether a daily or weekly allowance has already been released for the current period,
+ * and provide details on when the next allowance will become active.
+ */
+export function checkAllowanceStatus(
+  targetEnvelopeId: string,
+  periodType: 'daily' | 'weekly',
+  transfers: Transfer[],
+  now = new Date()
+): AllowancePeriodStatus {
+  const { todayStr, weekStartStr } = getJakartaDateStrings(now)
+
+  const indonesianDisplayFormatter = new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+
+  if (periodType === 'daily') {
+    const currentPeriodKey = `release:daily:${todayStr}:${targetEnvelopeId}`
+    const matchingTransfer = transfers.find(
+      (t) => t.period_key === currentPeriodKey || t.period_key?.startsWith(currentPeriodKey + ':extra-')
+    )
+
+    const d = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }))
+    d.setDate(d.getDate() + 1)
+    const nextDateFormatted = indonesianDisplayFormatter.format(d)
+
+    return {
+      isReleased: Boolean(matchingTransfer),
+      currentPeriodKey,
+      lastReleasedAt: matchingTransfer?.created_at,
+      lastReleasedAmount: matchingTransfer?.amount,
+      nextResetDescription: `Tunjangan harian berikutnya aktif besok (${nextDateFormatted})`,
+      periodLabel: 'Hari Ini',
+    }
+  } else {
+    const currentPeriodKey = `release:weekly:${weekStartStr}:${targetEnvelopeId}`
+    const matchingTransfer = transfers.find(
+      (t) => t.period_key === currentPeriodKey || t.period_key?.startsWith(currentPeriodKey + ':extra-')
+    )
+
+    const d = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }))
+    const dayOfWeek = d.getDay()
+    const diffToNextMonday = dayOfWeek === 0 ? 1 : 8 - dayOfWeek
+    d.setDate(d.getDate() + diffToNextMonday)
+    const nextMondayFormatted = indonesianDisplayFormatter.format(d)
+
+    return {
+      isReleased: Boolean(matchingTransfer),
+      currentPeriodKey,
+      lastReleasedAt: matchingTransfer?.created_at,
+      lastReleasedAmount: matchingTransfer?.amount,
+      nextResetDescription: `Tunjangan mingguan berikutnya aktif Senin (${nextMondayFormatted})`,
+      periodLabel: 'Minggu Ini',
+    }
   }
 }
 
@@ -534,15 +648,77 @@ export function coverDeficitAuto(params: {
     .filter((r) => r.is_active && r.target_envelope_id === deficitEnvelope.id)
     .sort((a, b) => a.priority_order - b.priority_order)
 
+  // Determine candidate sources:
+  // If user configured explicit rules, use them.
+  // Otherwise, use sensible financial hierarchy:
+  // 1. Linked parent funding pool (funding_source_id)
+  // 2. Other monthly funding pools (type: 'funding_pool')
+  // 3. Weekly/daily discretionary allowances (type: 'spending_weekly' | 'spending_daily')
+  // 4. Emergency funds & reserves (type: 'emergency_fund' | 'reserve')
+  // 5. Savings (type: 'savings', respecting min_protected_balance)
+  // Operational monthly spending (spending_monthly) is excluded from auto-coverage.
+  const candidateRules: { sourceId: string; maxAmount?: number | null }[] = []
+
+  if (activeRules.length > 0) {
+    for (const r of activeRules) {
+      candidateRules.push({ sourceId: r.source_envelope_id, maxAmount: r.max_coverage_amount })
+    }
+  } else {
+    // 1. Linked funding pool
+    if (deficitEnvelope.funding_source_id) {
+      candidateRules.push({ sourceId: deficitEnvelope.funding_source_id })
+    }
+    // 2. Other funding pools
+    for (const b of envelopeBalances) {
+      if (
+        b.envelope.type === 'funding_pool' &&
+        b.envelope.id !== deficitEnvelope.id &&
+        !candidateRules.some((c) => c.sourceId === b.envelope.id)
+      ) {
+        candidateRules.push({ sourceId: b.envelope.id })
+      }
+    }
+    // 3. Discretionary allowances (e.g. Jajan Mingguan / other daily allowance)
+    for (const b of envelopeBalances) {
+      if (
+        (b.envelope.type === 'spending_weekly' || b.envelope.type === 'spending_daily') &&
+        b.envelope.id !== deficitEnvelope.id &&
+        !candidateRules.some((c) => c.sourceId === b.envelope.id)
+      ) {
+        candidateRules.push({ sourceId: b.envelope.id })
+      }
+    }
+    // 4. Emergency fund & reserve
+    for (const b of envelopeBalances) {
+      if (
+        (b.envelope.type === 'emergency_fund' || b.envelope.type === 'reserve') &&
+        b.envelope.id !== deficitEnvelope.id &&
+        !candidateRules.some((c) => c.sourceId === b.envelope.id)
+      ) {
+        candidateRules.push({ sourceId: b.envelope.id })
+      }
+    }
+    // 5. Savings
+    for (const b of envelopeBalances) {
+      if (
+        b.envelope.type === 'savings' &&
+        b.envelope.id !== deficitEnvelope.id &&
+        !candidateRules.some((c) => c.sourceId === b.envelope.id)
+      ) {
+        candidateRules.push({ sourceId: b.envelope.id })
+      }
+    }
+  }
+
   const transfers: Transfer[] = []
   const summaryLog: string[] = []
   let needed = deficitAmount
   let coveredTotal = 0
 
-  for (const rule of activeRules) {
+  for (const candidate of candidateRules) {
     if (needed <= 0) break
 
-    const sourceInfo = balanceMap.get(rule.source_envelope_id)
+    const sourceInfo = balanceMap.get(candidate.sourceId)
     if (!sourceInfo) continue
 
     // Respect min_protected_balance
@@ -558,8 +734,8 @@ export function coverDeficitAuto(params: {
     }
 
     let takeAmount = Math.min(needed, usableFunds)
-    if (rule.max_coverage_amount && rule.max_coverage_amount > 0) {
-      takeAmount = Math.min(takeAmount, rule.max_coverage_amount)
+    if (candidate.maxAmount && candidate.maxAmount > 0) {
+      takeAmount = Math.min(takeAmount, candidate.maxAmount)
     }
 
     if (takeAmount <= 0) continue

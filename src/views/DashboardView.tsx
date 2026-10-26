@@ -10,8 +10,9 @@ import {
   Layers,
   ChevronRight,
   Plus,
+  CheckCircle2,
 } from 'lucide-react'
-import { formatRupiah } from '../services/financialEngine'
+import { formatRupiah, checkAllowanceStatus } from '../services/financialEngine'
 import type { Envelope, EnvelopeBalanceInfo } from '../types/finance'
 import { useFinance } from '../context/FinanceContext'
 import type { NavTab } from '../components/Navbar'
@@ -43,6 +44,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const weeklyEnvelope = summary.envelopes.find((e) => e.envelope.type === 'spending_weekly')
   const weeklyPool = summary.envelopes.find((e) => e.envelope.id === weeklyEnvelope?.envelope.funding_source_id)
+
+  // Check whether allowances are already released for current cycle (today or this week)
+  const dailyStatus = dailyEnvelope
+    ? checkAllowanceStatus(dailyEnvelope.envelope.id, 'daily', transfers)
+    : null
+
+  const weeklyStatus = weeklyEnvelope
+    ? checkAllowanceStatus(weeklyEnvelope.envelope.id, 'weekly', transfers)
+    : null
 
   // Deficit envelopes requiring attention
   const deficitEnvelopes = summary.envelopes.filter((e) => e.isDeficit)
@@ -281,12 +291,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             {dailyEnvelope && dailyPool && (
-              <button
-                onClick={() => onOpenRelease(dailyEnvelope.envelope, dailyPool.envelope, dailyPool.balance)}
-                className="px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/30 text-indigo-300 text-xs font-bold transition-all active:scale-95"
-              >
-                Rilis Hari Ini
-              </button>
+              <div className="flex items-center gap-2">
+                {dailyStatus?.isReleased ? (
+                  <>
+                    <span className="flex items-center gap-1 text-[11px] text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20 font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Sudah Dirilis
+                    </span>
+                    <button
+                      onClick={() => onOpenRelease(dailyEnvelope.envelope, dailyPool.envelope, dailyPool.balance)}
+                      className="px-2 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-[11px] font-semibold transition-colors border border-indigo-500/20"
+                      title="Cairkan tunjangan ekstra"
+                    >
+                      + Ekstra
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => onOpenRelease(dailyEnvelope.envelope, dailyPool.envelope, dailyPool.balance)}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 transition-all active:scale-95"
+                  >
+                    Rilis Hari Ini
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -305,6 +332,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <span>Sisa Pool Harian:</span>
                   <span className="font-mono text-slate-200">{formatRupiah(dailyPool.balance)}</span>
                 </div>
+              )}
+              {dailyStatus?.isReleased && (
+                <p className="text-[10px] text-slate-400 pt-0.5">
+                  {dailyStatus.nextResetDescription}
+                </p>
               )}
               {dailyEnvelope.availableSurplus > 0 && (
                 <div className="pt-2 flex justify-end">
@@ -338,12 +370,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             {weeklyEnvelope && weeklyPool && (
-              <button
-                onClick={() => onOpenRelease(weeklyEnvelope.envelope, weeklyPool.envelope, weeklyPool.balance)}
-                className="px-3 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/30 text-purple-300 text-xs font-bold transition-all active:scale-95"
-              >
-                Rilis Minggu Ini
-              </button>
+              <div className="flex items-center gap-2">
+                {weeklyStatus?.isReleased ? (
+                  <>
+                    <span className="flex items-center gap-1 text-[11px] text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20 font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Sudah Dirilis
+                    </span>
+                    <button
+                      onClick={() => onOpenRelease(weeklyEnvelope.envelope, weeklyPool.envelope, weeklyPool.balance)}
+                      className="px-2 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 text-[11px] font-semibold transition-colors border border-purple-500/20"
+                      title="Cairkan tunjangan ekstra"
+                    >
+                      + Ekstra
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => onOpenRelease(weeklyEnvelope.envelope, weeklyPool.envelope, weeklyPool.balance)}
+                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md shadow-purple-600/30 transition-all active:scale-95"
+                  >
+                    Rilis Minggu Ini
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -362,6 +411,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <span>Sisa Pool Mingguan:</span>
                   <span className="font-mono text-slate-200">{formatRupiah(weeklyPool.balance)}</span>
                 </div>
+              )}
+              {weeklyStatus?.isReleased && (
+                <p className="text-[10px] text-slate-400 pt-0.5">
+                  {weeklyStatus.nextResetDescription}
+                </p>
               )}
               {weeklyEnvelope.availableSurplus > 0 && (
                 <div className="pt-2 flex justify-end">
