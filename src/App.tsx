@@ -19,7 +19,7 @@ import { SurplusModal } from './components/SurplusModal'
 import { SupabaseGuideModal } from './components/SupabaseGuideModal'
 import { AuthModal } from './components/AuthModal'
 import type { Envelope, EnvelopeBalanceInfo, Transaction, TransactionType } from './types/finance'
-import { Lock, Mail, KeyRound, User, CheckCircle2, X } from 'lucide-react'
+import { Mail, KeyRound, User, CheckCircle2 } from 'lucide-react'
 
 // Login Gate: shows when Supabase is configured but no user is logged in
 const LoginGate: React.FC = () => {
