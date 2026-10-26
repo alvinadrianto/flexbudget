@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0.2"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded rect -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="url(#accentGrad)" stroke-width="4" stroke-opacity="0.3"/>
+
+  <!-- Logo Shape: Dynamic interlocking flexible money loops & shield -->
+  <g transform="translate(96, 96) scale(0.625)">
+    <!-- Shield / Vault Base -->
+    <path d="M256 48L80 128v144c0 120 75 232 176 272 101-40 176-152 176-272V128L256 48z" 
+          fill="none" stroke="url(#accentGrad)" stroke-width="24" stroke-linejoin="round"/>
+    
+    <!-- Inner Rupiah / Flex Symbol -->
+    <!-- Stylized 'F' & 'B' interlocking arrows -->
+    <path d="M192 192h128c35.3 0 64 28.7 64 64s-28.7 64-64 64H192V192z" 
+          fill="none" stroke="#38bdf8" stroke-width="20" stroke-linecap="round"/>
+    <path d="M192 320h144c35.3 0 64 28.7 64 64s-28.7 64-64 64H192V320z" 
+          fill="none" stroke="#10b981" stroke-width="20" stroke-linecap="round"/>
+    <line x1="192" y1="160" x2="192" y2="472" stroke="#ffffff" stroke-width="24" stroke-linecap="round"/>
+    <line x1="160" y1="240" x2="270" y2="240" stroke="#ffffff" stroke-width="18" stroke-linecap="round"/>
+    
+    <!-- Sparkle / Balance Nodes -->
+    <circle cx="256" cy="112" r="16" fill="#10b981"/>
+    <circle cx="360" cy="256" r="14" fill="#6366f1"/>
+    <circle cx="376" cy="384" r="14" fill="#38bdf8"/>
+  </g>
+</svg>
