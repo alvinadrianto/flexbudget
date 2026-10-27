@@ -1131,4 +1131,83 @@ describe('FlexBudget Financial Engine & Accounting Invariants', () => {
     expect(autoResult.transfers[0].source_envelope_id).toBe(weeklyJajan.id)
     expect(autoResult.summaryLog.some((log) => log.includes(weeklyJajan.name))).toBe(true)
   })
+
+  it('21. Daily envelope spentThisPeriod resets on a new day while preserving lifetime spentAmount and balance', () => {
+    const template = getInitialBudgetTemplate(userId)
+    const dailySpending = template.envelopes.find((e) => e.id === 'env-daily-spending')!
+
+    // Transfer in: Rp30.000 allocated on day 1 (Oct 26) and Rp30.000 released on day 2 (Oct 27)
+    const transfers: Transfer[] = [
+      {
+        id: 'tr-1',
+        user_id: userId,
+        type: 'allocation',
+        source_envelope_id: null,
+        destination_envelope_id: dailySpending.id,
+        amount: 30000,
+        description: 'Alokasi Day 1',
+        created_at: '2026-10-26T08:00:00Z',
+      },
+      {
+        id: 'tr-2',
+        user_id: userId,
+        type: 'pool_release',
+        source_envelope_id: 'pool-daily-spending',
+        destination_envelope_id: dailySpending.id,
+        amount: 30000,
+        description: 'Rilis Day 2',
+        created_at: '2026-10-27T08:00:00Z',
+      },
+    ]
+
+    // Transactions: Spent Rp25.000 on Oct 26, and Rp10.000 on Oct 27
+    const transactions: Transaction[] = [
+      {
+        id: 'tx-day1',
+        user_id: userId,
+        type: 'expense',
+        amount: 25000,
+        date: '2026-10-26',
+        envelope_id: dailySpending.id,
+        description: 'Makan Day 1',
+      },
+      {
+        id: 'tx-day2',
+        user_id: userId,
+        type: 'expense',
+        amount: 10000,
+        date: '2026-10-27',
+        envelope_id: dailySpending.id,
+        description: 'Makan Day 2',
+      },
+    ]
+
+    // Evaluate on Day 2 (2026-10-27 Jakarta time)
+    const nowDay2 = new Date('2026-10-27T10:00:00+07:00')
+    const summaryDay2 = generateFinancialSummary(mockProfile, template.envelopes, transactions, transfers, nowDay2)
+    const dailyDay2 = summaryDay2.envelopes.find((e) => e.envelope.id === dailySpending.id)!
+
+    // Lifetime spentAmount is cumulative: 25.000 + 10.000 = 35.000
+    expect(dailyDay2.spentAmount).toBe(35000)
+
+    // Sisa Saldo: 60.000 in - 35.000 out = 25.000
+    expect(dailyDay2.balance).toBe(25000)
+
+    // spentThisPeriod for today (Oct 27) only counts today's expense = Rp10.000!
+    // It does NOT include yesterday's Rp25.000, so progress bar will not be red!
+    expect(dailyDay2.spentThisPeriod).toBe(10000)
+    expect((dailyDay2.spentThisPeriod ?? 0) <= dailyDay2.envelope.period_amount).toBe(true)
+
+    // Evaluate on Day 3 with NO expenses yet (2026-10-28)
+    const nowDay3 = new Date('2026-10-28T09:00:00+07:00')
+    const summaryDay3 = generateFinancialSummary(mockProfile, template.envelopes, transactions, transfers, nowDay3)
+    const dailyDay3 = summaryDay3.envelopes.find((e) => e.envelope.id === dailySpending.id)!
+
+    // On Day 3, spentThisPeriod resets to 0!
+    expect(dailyDay3.spentThisPeriod).toBe(0)
+    // Lifetime spentAmount and balance remain preserved
+    expect(dailyDay3.spentAmount).toBe(35000)
+    expect(dailyDay3.balance).toBe(25000)
+  })
 })
+

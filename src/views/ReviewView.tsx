@@ -27,7 +27,7 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
     return e.envelope.period_type === 'monthly'
   })
 
-  const totalSpent = envelopesInScope.reduce((sum, e) => sum + e.spentAmount, 0)
+  const totalSpent = envelopesInScope.reduce((sum, e) => sum + (e.spentThisPeriod ?? e.spentAmount), 0)
   const totalSurplus = envelopesInScope.reduce((sum, e) => sum + e.availableSurplus, 0)
   const totalDeficit = envelopesInScope.reduce((sum, e) => sum + e.deficitAmount, 0)
 
@@ -112,7 +112,7 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {envelopesInScope.map((info) => {
-              const { envelope: env, balance, spentAmount, isDeficit, deficitAmount, availableSurplus } = info
+              const { envelope: env, balance, spentAmount, spentThisPeriod, isDeficit, deficitAmount, availableSurplus } = info
 
               return (
                 <div
@@ -146,8 +146,8 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
 
                   <div className="mt-4 p-3 rounded-2xl bg-slate-950 border border-slate-800/80 space-y-1.5 text-xs">
                     <div className="flex justify-between text-slate-400">
-                      <span>Pengeluaran Tercatat:</span>
-                      <span className="font-mono text-white font-bold">{formatRupiah(spentAmount)}</span>
+                      <span>Pengeluaran Periode Ini:</span>
+                      <span className="font-mono text-white font-bold">{formatRupiah(spentThisPeriod ?? spentAmount)}</span>
                     </div>
                     <div className="flex justify-between text-slate-400">
                       <span>Sisa Saldo:</span>

@@ -202,14 +202,14 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
                     <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all duration-300 ${
-                          (info.poolReleasedOut || 0) >= env.period_amount ? 'bg-rose-500' : 'bg-amber-500'
+                          (info.poolReleasedOutThisPeriod ?? info.poolReleasedOut ?? 0) >= env.period_amount ? 'bg-rose-500' : 'bg-amber-500'
                         }`}
-                        style={{ width: `${Math.min(100, ((info.poolReleasedOut || 0) / env.period_amount) * 100)}%` }}
+                        style={{ width: `${Math.min(100, (((info.poolReleasedOutThisPeriod ?? info.poolReleasedOut ?? 0) / env.period_amount) * 100))}%` }}
                       />
                     </div>
                     <div className="flex justify-between text-[11px] text-slate-500 font-mono">
-                      <span>{Math.round(((info.poolReleasedOut || 0) / env.period_amount) * 100)}% tersalurkan</span>
-                      <span>Sisa bujet: {formatRupiah(Math.max(0, env.period_amount - (info.poolReleasedOut || 0)))}</span>
+                      <span>{Math.round((((info.poolReleasedOutThisPeriod ?? info.poolReleasedOut ?? 0) / env.period_amount) * 100))}% tersalurkan (bulan ini)</span>
+                      <span>Sisa bujet: {formatRupiah(Math.max(0, env.period_amount - (info.poolReleasedOutThisPeriod ?? info.poolReleasedOut ?? 0)))}</span>
                     </div>
                   </div>
                 )}
@@ -224,7 +224,8 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-slate-400 gap-2">
                   <span className="truncate">
-                    Terpakai: <strong className="text-slate-200 font-mono">{formatRupiah(spentAmount)}</strong>
+                    Terpakai ({env.period_type === 'daily' ? 'Hari Ini' : env.period_type === 'weekly' ? 'Minggu Ini' : 'Bulan Ini'}):{' '}
+                    <strong className="text-slate-200 font-mono">{formatRupiah(info.spentThisPeriod ?? spentAmount)}</strong>
                   </span>
                   {env.period_amount > 0 && (
                     <span className="shrink-0 text-right">
@@ -238,9 +239,9 @@ export const EnvelopesView: React.FC<EnvelopesViewProps> = ({
                   <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-300 ${
-                        spentAmount > env.period_amount ? 'bg-rose-500' : 'bg-indigo-500'
+                        (info.spentThisPeriod ?? spentAmount) > env.period_amount ? 'bg-rose-500' : 'bg-indigo-500'
                       }`}
-                      style={{ width: `${Math.min(100, (spentAmount / env.period_amount) * 100)}%` }}
+                      style={{ width: `${Math.min(100, (((info.spentThisPeriod ?? spentAmount) / env.period_amount) * 100))}%` }}
                     />
                   </div>
                 )}

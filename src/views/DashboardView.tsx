@@ -320,11 +320,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {dailyEnvelope ? (
             <div className="space-y-2 pt-1">
               <div className="flex justify-between items-baseline">
-                <span className="text-xs text-slate-400">Sisa Saldo Hari Ini:</span>
+                <span className="text-xs text-slate-400">Sisa Saldo Amplop:</span>
                 <span className={`text-xl font-bold font-mono ${
                   dailyEnvelope.balance < 0 ? 'text-rose-400' : 'text-emerald-400'
                 }`}>
                   {formatRupiah(dailyEnvelope.balance)}
+                </span>
+              </div>
+              <div className="flex justify-between text-[11px] text-slate-400">
+                <span>Terpakai Hari Ini:</span>
+                <span className={`font-mono font-medium ${
+                  (dailyEnvelope.spentThisPeriod ?? 0) > dailyEnvelope.envelope.period_amount ? 'text-rose-400' : 'text-slate-200'
+                }`}>
+                  {formatRupiah(dailyEnvelope.spentThisPeriod ?? 0)}
                 </span>
               </div>
               {dailyPool && (
@@ -404,6 +412,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   weeklyEnvelope.balance < 0 ? 'text-rose-400' : 'text-emerald-400'
                 }`}>
                   {formatRupiah(weeklyEnvelope.balance)}
+                </span>
+              </div>
+              <div className="flex justify-between text-[11px] text-slate-400">
+                <span>Terpakai Minggu Ini:</span>
+                <span className={`font-mono font-medium ${
+                  (weeklyEnvelope.spentThisPeriod ?? 0) > weeklyEnvelope.envelope.period_amount ? 'text-rose-400' : 'text-slate-200'
+                }`}>
+                  {formatRupiah(weeklyEnvelope.spentThisPeriod ?? 0)}
                 </span>
               </div>
               {weeklyPool && (

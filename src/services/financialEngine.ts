@@ -73,6 +73,65 @@ export function calculateTrackedBalance(
 }
 
 /**
+ * Filter transactions by timeframe (today, this week, this month)
+ * in Asia/Jakarta timezone.
+ */
+export function getJakartaDateStrings(now = new Date()): {
+  todayStr: string
+  weekStartStr: string
+  weekEndStr: string
+  monthStartStr: string
+} {
+  // Formatter for Jakarta date YYYY-MM-DD
+  const jakartaDateFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+
+  const todayStr = jakartaDateFormatter.format(now)
+
+  // Calculate start of current week (Monday) in Jakarta
+  const d = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }))
+  const dayOfWeek = d.getDay() // 0 = Sunday, 1 = Monday
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+  d.setDate(d.getDate() + diffToMonday)
+  const weekStartStr = jakartaDateFormatter.format(d)
+
+  // Calculate Sunday of current week
+  const dSun = new Date(d)
+  dSun.setDate(dSun.getDate() + 6)
+  const weekEndStr = jakartaDateFormatter.format(dSun)
+
+  // Month start: YYYY-MM-01
+  const monthStartStr = `${todayStr.slice(0, 7)}-01`
+
+  return {
+    todayStr,
+    weekStartStr,
+    weekEndStr,
+    monthStartStr,
+  }
+}
+
+export function getJakartaDateFromIso(isoString?: string | null): string {
+  if (!isoString) return ''
+  try {
+    const d = new Date(isoString)
+    if (isNaN(d.getTime())) return isoString.slice(0, 10)
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d)
+  } catch {
+    return isoString.slice(0, 10)
+  }
+}
+
+/**
  * Calculate balances for all envelopes based on historical transactions and transfers.
  *
  * For each envelope:
@@ -83,19 +142,34 @@ export function calculateTrackedBalance(
 export function calculateEnvelopeBalances(
   envelopes: Envelope[],
   transactions: Transaction[],
-  transfers: Transfer[]
+  transfers: Transfer[],
+  now = new Date()
 ): EnvelopeBalanceInfo[] {
+  const { todayStr, weekStartStr, weekEndStr } = getJakartaDateStrings(now)
+  const monthPrefix = todayStr.slice(0, 7)
+
   // Aggregate credits and debits from transfers ledger
   const creditsMap = new Map<string, number>()
   const debitsMap = new Map<string, number>()
   const expensesMap = new Map<string, number>()
+  const expensesTodayMap = new Map<string, number>()
+  const expensesWeekMap = new Map<string, number>()
+  const expensesMonthMap = new Map<string, number>()
+
   const deficitCoverGivenMap = new Map<string, number>()
+  const deficitCoverGivenTodayMap = new Map<string, number>()
+  const deficitCoverGivenWeekMap = new Map<string, number>()
+  const deficitCoverGivenMonthMap = new Map<string, number>()
+
   const deficitCoverReceivedMap = new Map<string, number>()
   // Track only pool_release transfers flowing OUT of each envelope (for funding_pool spentAmount)
   const poolReleasedOutMap = new Map<string, number>()
+  const poolReleasedOutThisMonthMap = new Map<string, number>()
 
   for (const tr of transfers) {
     const amt = Math.max(0, Math.round(tr.amount))
+    const trDate = getJakartaDateFromIso(tr.created_at) || todayStr
+
     if (tr.destination_envelope_id) {
       creditsMap.set(
         tr.destination_envelope_id,
@@ -118,6 +192,24 @@ export function calculateEnvelopeBalances(
           tr.source_envelope_id,
           (deficitCoverGivenMap.get(tr.source_envelope_id) || 0) + amt
         )
+        if (trDate === todayStr) {
+          deficitCoverGivenTodayMap.set(
+            tr.source_envelope_id,
+            (deficitCoverGivenTodayMap.get(tr.source_envelope_id) || 0) + amt
+          )
+        }
+        if (trDate >= weekStartStr && trDate <= weekEndStr) {
+          deficitCoverGivenWeekMap.set(
+            tr.source_envelope_id,
+            (deficitCoverGivenWeekMap.get(tr.source_envelope_id) || 0) + amt
+          )
+        }
+        if (trDate.startsWith(monthPrefix)) {
+          deficitCoverGivenMonthMap.set(
+            tr.source_envelope_id,
+            (deficitCoverGivenMonthMap.get(tr.source_envelope_id) || 0) + amt
+          )
+        }
       }
       // Track pool_release outflows separately for funding_pool "terpakai"
       if (tr.type === 'pool_release') {
@@ -125,6 +217,12 @@ export function calculateEnvelopeBalances(
           tr.source_envelope_id,
           (poolReleasedOutMap.get(tr.source_envelope_id) || 0) + amt
         )
+        if (trDate.startsWith(monthPrefix)) {
+          poolReleasedOutThisMonthMap.set(
+            tr.source_envelope_id,
+            (poolReleasedOutThisMonthMap.get(tr.source_envelope_id) || 0) + amt
+          )
+        }
       }
     }
   }
@@ -136,6 +234,25 @@ export function calculateEnvelopeBalances(
         tx.envelope_id,
         (expensesMap.get(tx.envelope_id) || 0) + amt
       )
+
+      if (tx.date === todayStr) {
+        expensesTodayMap.set(
+          tx.envelope_id,
+          (expensesTodayMap.get(tx.envelope_id) || 0) + amt
+        )
+      }
+      if (tx.date >= weekStartStr && tx.date <= weekEndStr) {
+        expensesWeekMap.set(
+          tx.envelope_id,
+          (expensesWeekMap.get(tx.envelope_id) || 0) + amt
+        )
+      }
+      if (tx.date.startsWith(monthPrefix)) {
+        expensesMonthMap.set(
+          tx.envelope_id,
+          (expensesMonthMap.get(tx.envelope_id) || 0) + amt
+        )
+      }
     }
   }
 
@@ -146,19 +263,38 @@ export function calculateEnvelopeBalances(
     const deficitCoverGiven = deficitCoverGivenMap.get(env.id) || 0
     const deficitCoverReceived = deficitCoverReceivedMap.get(env.id) || 0
     const poolReleasedOut = poolReleasedOutMap.get(env.id) || 0
+    const poolReleasedOutThisPeriod = poolReleasedOutThisMonthMap.get(env.id) || 0
 
     // Balance formula: sum of transfers in - sum of transfers out - direct expenses
     const balance = transferredIn - transferredOut - directExpenses
 
     /**
-     * "Terpakai" (spentAmount):
-     * Always = directExpenses + deficitCoverGiven for all envelope types.
-     *
-     * Funding pools never receive direct expense transactions, so their spentAmount = 0
-     * (unless they exceptionally provide deficit coverage to another envelope).
-     * The "distributed" amount for a pool is exposed separately as poolReleasedOut.
+     * Lifetime spentAmount:
+     * directExpenses + deficitCoverGiven for all envelope types.
      */
     const spentAmount = directExpenses + deficitCoverGiven
+
+    /**
+     * Period-specific spent (terpakai dalam siklus aktifnya):
+     * - daily: hari ini (today)
+     * - weekly: minggu ini (this week)
+     * - monthly & others: bulan ini (this month)
+     */
+    let directExpensesThisPeriod = 0
+    let deficitCoverGivenThisPeriod = 0
+
+    if (env.period_type === 'daily') {
+      directExpensesThisPeriod = expensesTodayMap.get(env.id) || 0
+      deficitCoverGivenThisPeriod = deficitCoverGivenTodayMap.get(env.id) || 0
+    } else if (env.period_type === 'weekly') {
+      directExpensesThisPeriod = expensesWeekMap.get(env.id) || 0
+      deficitCoverGivenThisPeriod = deficitCoverGivenWeekMap.get(env.id) || 0
+    } else {
+      directExpensesThisPeriod = expensesMonthMap.get(env.id) || 0
+      deficitCoverGivenThisPeriod = deficitCoverGivenMonthMap.get(env.id) || 0
+    }
+
+    const spentThisPeriod = directExpensesThisPeriod + deficitCoverGivenThisPeriod
 
     const isDeficit = balance < 0
     const deficitAmount = isDeficit ? Math.abs(balance) : 0
@@ -171,55 +307,20 @@ export function calculateEnvelopeBalances(
       envelope: env,
       balance,
       spentAmount,
+      spentThisPeriod,
       directExpenses,
+      directExpensesThisPeriod,
       deficitCoverGiven,
       deficitCoverReceived,
       poolReleasedOut: env.type === 'funding_pool' ? poolReleasedOut : undefined,
+      poolReleasedOutThisPeriod: env.type === 'funding_pool' ? poolReleasedOutThisPeriod : undefined,
       transferredIn,
       transferredOut,
       isDeficit,
       deficitAmount,
       availableSurplus,
     }
-
   })
-}
-
-
-/**
- * Filter transactions by timeframe (today, this week, this month)
- * in Asia/Jakarta timezone.
- */
-export function getJakartaDateStrings(now = new Date()): {
-  todayStr: string
-  weekStartStr: string
-  monthStartStr: string
-} {
-  // Formatter for Jakarta date YYYY-MM-DD
-  const jakartaDateFormatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Jakarta',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
-
-  const todayStr = jakartaDateFormatter.format(now)
-
-  // Calculate start of current week (Monday) in Jakarta
-  const d = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }))
-  const dayOfWeek = d.getDay() // 0 = Sunday, 1 = Monday
-  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
-  d.setDate(d.getDate() + diffToMonday)
-  const weekStartStr = jakartaDateFormatter.format(d)
-
-  // Month start: YYYY-MM-01
-  const monthStartStr = `${todayStr.slice(0, 7)}-01`
-
-  return {
-    todayStr,
-    weekStartStr,
-    monthStartStr,
-  }
 }
 
 export interface AllowancePeriodStatus {
@@ -311,7 +412,8 @@ export function generateFinancialSummary(
   const envelopeBalances = calculateEnvelopeBalances(
     envelopes,
     transactions,
-    transfers
+    transfers,
+    now
   )
 
   // Sum of all envelope balances (can be positive or negative)

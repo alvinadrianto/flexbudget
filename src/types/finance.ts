@@ -52,11 +52,14 @@ export interface Envelope {
 export interface EnvelopeBalanceInfo {
   envelope: Envelope
   balance: number // Can be negative when overspent
-  spentAmount: number // For spending envelopes: actual expenses + deficitCoverGiven. For funding_pool: always 0 (pools don't spend, they distribute)
-  directExpenses?: number // Direct transactions (expense) charged to this envelope
-  deficitCoverGiven?: number // Funds transferred out to cover other envelopes' deficits
+  spentAmount: number // Lifetime total expenses + deficitCoverGiven
+  spentThisPeriod?: number // Expenses + deficitCoverGiven in the current active cycle (today for daily, this week for weekly, this month for monthly)
+  directExpenses?: number // Direct transactions (expense) charged to this envelope (lifetime)
+  directExpensesThisPeriod?: number // Direct expenses charged to this envelope in current period
+  deficitCoverGiven?: number // Funds transferred out to cover other envelopes' deficits (lifetime)
   deficitCoverReceived?: number // Funds received to cover this envelope's deficit
-  poolReleasedOut?: number // For funding_pool only: total pool_release transfers sent to child envelopes ("Tersalurkan")
+  poolReleasedOut?: number // For funding_pool only: total pool_release transfers sent to child envelopes ("Tersalurkan" lifetime)
+  poolReleasedOutThisPeriod?: number // For funding_pool only: pool_release transfers sent this month
   transferredIn: number // Total credits into this envelope
   transferredOut: number // Total debits out of this envelope
   isDeficit: boolean
